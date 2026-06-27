@@ -2,13 +2,13 @@
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#0f766e">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="Recebimento">
+    <meta name="apple-mobile-web-app-title" content="Conferências">
     <meta name="format-detection" content="telephone=no">
-    <title>Recebimento de Mercadorias</title>
+    <title>Conferência de Mercadorias</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
@@ -16,96 +16,110 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">Coletor de dados</p>
-          <h1>Recebimento de mercadorias</h1>
+          <h1>Conferência de mercadorias</h1>
         </div>
-        <div class="summary-strip" aria-label="Resumo do recebimento">
-          <span><strong id="totalItems">0</strong> registros</span>
-          <span><strong id="totalUnits">0</strong> unidades</span>
+        <div class="summary-strip" aria-label="Resumo geral">
+          <span><strong id="totalConferences">0</strong> conferências</span>
+          <span><strong id="totalItems">0</strong> itens</span>
         </div>
       </header>
 
-      <section class="workspace">
-        <form id="itemForm" class="entry-panel" autocomplete="off" novalidate>
-          <div class="scanner-area">
-            <video id="scannerVideo" playsinline muted hidden></video>
-            <div id="scannerFallback" class="scanner-fallback">
-              <span class="scan-mark" aria-hidden="true"></span>
-              <div>
-                <strong>Leitor de código</strong>
-                <p>Use a câmera ou digite o código manualmente.</p>
-              </div>
-            </div>
-          </div>
+      <nav class="main-tabs" aria-label="Navegação principal">
+        <button type="button" class="tab-button active" data-view="new">Nova conferência</button>
+        <button type="button" class="tab-button" data-view="history">Conferências</button>
+      </nav>
 
-          <div class="button-row">
-            <button type="button" id="startScan" class="tool-button">
-              <span aria-hidden="true">[]</span>
-              <span>Ler código</span>
-            </button>
-            <button type="button" id="stopScan" class="tool-button muted" disabled>
-              <span aria-hidden="true">x</span>
-              <span>Parar leitura</span>
-            </button>
-          </div>
-          <input id="barcodePhoto" class="sr-only-file" type="file" accept="image/*" capture="environment">
-          <p id="scanStatus" class="scan-status" role="status"></p>
-          <p class="scan-tip">Aponte a câmera para o código. Se a câmera não estiver disponível, será aberta a captura de foto.</p>
-          <div id="barcodeReader" class="reader-mount" aria-hidden="true"></div>
-
-          <label>
-            Código de barras
-            <input id="barcode" name="barcode" inputmode="numeric" placeholder="7890000000000" required>
-          </label>
-
-          <label>
-            Descrição
-            <input id="description" name="description" placeholder="Ex.: Caixa de parafusos 10 mm" required>
-          </label>
-
-          <div class="field-grid">
-            <label>
-              Quantidade recebida
-              <input id="quantity" name="quantity" type="number" min="1" step="1" value="1" required>
-            </label>
-            <label>
-              Foto da mercadoria
-              <input id="photo" name="photo" type="file" accept="image/*" capture="environment">
-            </label>
-          </div>
-
-          <div class="photo-preview" id="photoPreview">
-            <span>Sem foto</span>
-          </div>
-
-          <div class="action-row">
-            <button type="submit" class="primary-action">Salvar recebimento</button>
-            <button type="button" id="clearForm" class="secondary-action">Limpar</button>
-          </div>
-          <p id="formStatus" class="form-status" role="status"></p>
-        </form>
-
-        <section class="list-panel" aria-labelledby="listTitle">
-          <div class="list-header">
+      <section id="newView" class="view active">
+        <section class="conference-header panel">
+          <div class="section-heading">
             <div>
-              <p class="eyebrow">Recebimentos registrados</p>
-              <h2 id="listTitle">Lista atual</h2>
+              <p class="eyebrow">Identificação</p>
+              <h2 id="draftTitle">Nova conferência</h2>
             </div>
-            <div class="button-row compact">
-              <button type="button" id="exportCsv" class="tool-button">CSV</button>
-              <button type="button" id="clearAll" class="tool-button danger">Apagar tudo</button>
-            </div>
+            <button type="button" id="newConference" class="secondary-action small">Limpar e iniciar nova</button>
           </div>
+          <div class="conference-fields">
+            <label>
+              Nome ou número da nota
+              <input id="invoiceNumber" autocomplete="off" placeholder="Ex.: NF 12345" required>
+            </label>
+            <label>
+              Nome do conferente
+              <input id="inspectorName" autocomplete="name" placeholder="Ex.: Marcos Silva" required>
+            </label>
+          </div>
+        </section>
 
+        <section class="workspace">
+          <form id="itemForm" class="entry-panel panel" autocomplete="off" novalidate>
+            <div class="section-heading item-heading">
+              <div>
+                <p class="eyebrow">Mercadoria</p>
+                <h2>Adicionar item</h2>
+              </div>
+              <span id="draftCount" class="count-pill">0 itens</span>
+            </div>
+
+            <div class="scanner-area">
+              <div id="scannerFallback" class="scanner-fallback">
+                <span class="scan-mark" aria-hidden="true"></span>
+                <div><strong>Leitor de código</strong><p>Use a câmera ou digite o código.</p></div>
+              </div>
+              <div id="barcodeReader" class="reader-mount" aria-hidden="true"></div>
+            </div>
+            <div class="button-row">
+              <button type="button" id="startScan" class="tool-button">Ler código</button>
+              <button type="button" id="stopScan" class="tool-button muted" disabled>Parar</button>
+            </div>
+            <input id="barcodePhoto" class="sr-only-file" type="file" accept="image/*" capture="environment">
+            <p id="scanStatus" class="scan-status" role="status">Toque em Ler código para usar a câmera.</p>
+
+            <label>Código de barras<input id="barcode" inputmode="numeric" placeholder="7890000000000" required></label>
+            <label>Descrição<input id="description" placeholder="Ex.: Caixa de parafusos 10 mm" required></label>
+            <div class="field-grid">
+              <label>Quantidade<input id="quantity" type="number" min="1" step="1" value="1" required></label>
+              <label>Foto da mercadoria<input id="photo" type="file" accept="image/*" capture="environment"></label>
+            </div>
+            <div class="photo-preview" id="photoPreview"><span>Sem foto</span></div>
+            <div class="action-row">
+              <button type="submit" class="primary-action">Adicionar item</button>
+              <button type="button" id="clearForm" class="secondary-action">Limpar item</button>
+            </div>
+            <p id="formStatus" class="form-status" role="status"></p>
+          </form>
+
+          <section class="list-panel panel" aria-labelledby="currentListTitle">
+            <div class="section-heading">
+              <div><p class="eyebrow">Itens da nota</p><h2 id="currentListTitle">Conferência atual</h2></div>
+              <span id="draftUnits" class="count-pill">0 unidades</span>
+            </div>
+            <div id="draftEmpty" class="empty-state compact-empty">
+              <strong>Nenhum item adicionado.</strong>
+              <p>Escaneie o código e registre a primeira mercadoria.</p>
+            </div>
+            <div id="draftItems" class="items-list"></div>
+            <div class="save-conference-bar">
+              <button type="button" id="saveConference" class="primary-action save-conference">Salvar conferência</button>
+              <p id="conferenceStatus" class="form-status" role="status"></p>
+            </div>
+          </section>
+        </section>
+      </section>
+
+      <section id="historyView" class="view">
+        <section class="panel history-panel">
+          <div class="section-heading history-heading">
+            <div><p class="eyebrow">Arquivo</p><h2>Conferências salvas</h2></div>
+            <button type="button" id="goToNew" class="primary-action small">+ Nova conferência</button>
+          </div>
           <div class="search-row">
-            <input id="search" type="search" placeholder="Buscar por código ou descrição">
+            <input id="conferenceSearch" type="search" placeholder="Pesquisar nota, conferente, código ou descrição">
           </div>
-
-          <div id="emptyState" class="empty-state">
-            <strong>Nenhum recebimento registrado ainda.</strong>
-            <p>Escaneie o código, informe a descrição, a quantidade e tire uma foto para criar o primeiro registro.</p>
+          <div id="historyEmpty" class="empty-state">
+            <strong>Nenhuma conferência encontrada.</strong>
+            <p>As conferências salvas aparecerão aqui.</p>
           </div>
-
-          <div id="itemsList" class="items-list"></div>
+          <div id="conferenceList" class="conference-list"></div>
         </section>
       </section>
     </main>
@@ -114,22 +128,35 @@
       <article class="item-card">
         <div class="thumb"></div>
         <div class="item-main">
-          <div class="item-title-row">
-            <h3></h3>
-            <span class="qty-pill"></span>
-          </div>
+          <div class="item-title-row"><h3></h3><span class="qty-pill"></span></div>
           <p class="code-line"></p>
-          <p class="date-line"></p>
         </div>
         <div class="item-actions">
-          <button type="button" class="icon-action edit" title="Editar">E</button>
-          <button type="button" class="icon-action remove" title="Remover">-</button>
+          <button type="button" class="icon-action edit">Editar</button>
+          <button type="button" class="icon-action remove">Excluir</button>
+        </div>
+      </article>
+    </template>
+
+    <template id="conferenceTemplate">
+      <article class="conference-card">
+        <div class="conference-card-main">
+          <p class="eyebrow card-date"></p>
+          <h3 class="card-invoice"></h3>
+          <p class="card-inspector"></p>
+          <p class="card-summary"></p>
+        </div>
+        <div class="conference-actions">
+          <button type="button" class="tool-button open-conference">Abrir</button>
+          <button type="button" class="tool-button export-excel">Excel</button>
+          <button type="button" class="tool-button export-pdf">PDF com fotos</button>
+          <button type="button" class="tool-button danger delete-conference">Excluir</button>
         </div>
       </article>
     </template>
 
     <script src="https://unpkg.com/html5-qrcode" crossorigin="anonymous"></script>
-    <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js" crossorigin="anonymous"></script>
     <script src="app.js"></script>
   </body>
 </html>

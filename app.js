@@ -1,435 +1,390 @@
-const storageKey = "conferencia-mercadorias-v1";
+const conferencesKey = "conferencia-mercadorias-v2";
+const draftKey = "conferencia-rascunho-v2";
 
-const form = document.querySelector("#itemForm");
-const barcodeInput = document.querySelector("#barcode");
-const descriptionInput = document.querySelector("#description");
-const quantityInput = document.querySelector("#quantity");
-const photoInput = document.querySelector("#photo");
-const photoPreview = document.querySelector("#photoPreview");
-const itemsList = document.querySelector("#itemsList");
-const itemTemplate = document.querySelector("#itemTemplate");
-const emptyState = document.querySelector("#emptyState");
-const searchInput = document.querySelector("#search");
-const totalItems = document.querySelector("#totalItems");
-const totalUnits = document.querySelector("#totalUnits");
-const exportCsvButton = document.querySelector("#exportCsv");
-const clearAllButton = document.querySelector("#clearAll");
-const clearFormButton = document.querySelector("#clearForm");
-const startScanButton = document.querySelector("#startScan");
-const stopScanButton = document.querySelector("#stopScan");
-const scannerVideo = document.querySelector("#scannerVideo");
-const scannerFallback = document.querySelector("#scannerFallback");
-const barcodePhotoInput = document.querySelector("#barcodePhoto");
-const scanStatus = document.querySelector("#scanStatus");
-const formStatus = document.querySelector("#formStatus");
-const barcodeReaderId = "barcodeReader";
-const barcodeReader = document.querySelector("#barcodeReader");
+const $ = (selector) => document.querySelector(selector);
+const form = $("#itemForm");
+const invoiceInput = $("#invoiceNumber");
+const inspectorInput = $("#inspectorName");
+const barcodeInput = $("#barcode");
+const descriptionInput = $("#description");
+const quantityInput = $("#quantity");
+const photoInput = $("#photo");
+const photoPreview = $("#photoPreview");
+const draftItems = $("#draftItems");
+const draftEmpty = $("#draftEmpty");
+const itemTemplate = $("#itemTemplate");
+const conferenceTemplate = $("#conferenceTemplate");
+const conferenceList = $("#conferenceList");
+const historyEmpty = $("#historyEmpty");
+const searchInput = $("#conferenceSearch");
+const startScanButton = $("#startScan");
+const stopScanButton = $("#stopScan");
+const barcodePhotoInput = $("#barcodePhoto");
+const barcodeReader = $("#barcodeReader");
+const scannerFallback = $("#scannerFallback");
 
-let items = loadItems();
-let editingId = null;
+let conferences = readJson(conferencesKey, []);
+let draft = readJson(draftKey, { id: null, invoice: "", inspector: "", items: [], startedAt: new Date().toISOString() });
+let editingItemId = null;
 let currentPhoto = "";
-let scanStream = null;
-let scanTimer = null;
-let detector = null;
-let html5Scanner = null;
-let lastDetectedCode = "";
-let statusTimer = null;
+let scanner = null;
+let messageTimer = null;
 
-render();
-setupBarcodeDetector();
+migrateOldItems();
+bindEvents();
+syncDraftFields();
+renderAll();
 
-startScanButton.addEventListener("click", startScanner);
+function bindEvents() {
+  document.querySelectorAll(".tab-button").forEach((button) => {
+    button.addEventListener("click", () => showView(button.dataset.view));
+  });
+  $("#goToNew").addEventListener("click", () => showView("new"));
+  $("#newConference").addEventListener("click", startNewConference);
+  $("#clearForm").addEventListener("click", resetItemForm);
+  $("#saveConference").addEventListener("click", saveConference);
+  invoiceInput.addEventListener("input", saveDraftHeader);
+  inspectorInput.addEventListener("input", saveDraftHeader);
+  photoInput.addEventListener("change", loadItemPhoto);
+  form.addEventListener("submit", addOrUpdateItem);
+  draftItems.addEventListener("click", handleDraftItemAction);
+  conferenceList.addEventListener("click", handleConferenceAction);
+  searchInput.addEventListener("input", renderHistory);
+  startScanButton.addEventListener("click", startScanner);
+  stopScanButton.addEventListener("click", stopScanner);
+  barcodePhotoInput.addEventListener("change", scanCapturedPhoto);
+}
 
-form.addEventListener("submit", (event) => {
+function showView(name) {
+  document.querySelectorAll(".tab-button").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
+  $("#newView").classList.toggle("active", name === "new");
+  $("#historyView").classList.toggle("active", name === "history");
+  if (name === "history") renderHistory();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function saveDraftHeader() {
+  draft.invoice = invoiceInput.value.trim();
+  draft.inspector = inspectorInput.value.trim();
+  persistDraft();
+  updateDraftTitle();
+}
+
+async function loadItemPhoto() {
+  const file = photoInput.files?.[0];
+  currentPhoto = file ? await resizeImage(file) : "";
+  renderPhotoPreview();
+}
+
+function addOrUpdateItem(event) {
   event.preventDefault();
-
   const barcode = barcodeInput.value.trim();
   const description = descriptionInput.value.trim();
   const quantity = Number(quantityInput.value);
 
-  if (!barcode) {
-    showFormStatus("Leia ou digite o código de barras antes de adicionar.");
-    barcodeInput.focus();
-    return;
-  }
+  if (!barcode) return showMessage("#formStatus", "Informe ou leia o código de barras.", barcodeInput);
+  if (!description) return showMessage("#formStatus", "Informe a descrição da mercadoria.", descriptionInput);
+  if (!Number.isFinite(quantity) || quantity < 1) return showMessage("#formStatus", "Informe uma quantidade válida.", quantityInput);
+  if (!currentPhoto) return showMessage("#formStatus", "Tire uma foto da mercadoria.", photoInput);
 
-  if (!description) {
-    showFormStatus("Informe a descrição da mercadoria.");
-    descriptionInput.focus();
-    return;
-  }
-
-  if (!Number.isFinite(quantity) || quantity < 1) {
-    showFormStatus("Informe uma quantidade válida.");
-    quantityInput.focus();
-    return;
-  }
-
-  if (!currentPhoto) {
-    showFormStatus("Tire ou selecione uma foto da mercadoria antes de salvar.");
-    photoInput.focus();
-    return;
-  }
-
-  if (editingId) {
-    items = items.map((item) => {
-      if (item.id !== editingId) return item;
-      return {
-        ...item,
-        barcode,
-        description,
-        quantity,
-        photo: currentPhoto,
-        updatedAt: new Date().toISOString()
-      };
-    });
+  const now = new Date().toISOString();
+  if (editingItemId) {
+    draft.items = draft.items.map((item) => item.id === editingItemId
+      ? { ...item, barcode, description, quantity, photo: currentPhoto, updatedAt: now }
+      : item);
   } else {
-    const existing = items.find((item) => item.barcode === barcode);
-    if (existing) {
-      items = items.map((item) => {
-        if (item.id !== existing.id) return item;
-        return {
-          ...item,
-          description,
-          quantity: item.quantity + quantity,
-          photo: currentPhoto || item.photo,
-          updatedAt: new Date().toISOString()
-        };
-      });
-    } else {
-      items.unshift({
-        id: crypto.randomUUID(),
-        barcode,
-        description,
-        quantity,
-        photo: currentPhoto,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
-    }
+    draft.items.unshift({ id: makeId(), barcode, description, quantity, photo: currentPhoto, createdAt: now, updatedAt: now });
   }
 
-  saveItems();
-  showFormStatus(editingId ? "Item atualizado. Pronto para o próximo." : "Item adicionado. Pronto para o próximo.");
-  resetForm();
-  render();
-});
+  if (!persistDraft()) return;
+  showMessage("#formStatus", editingItemId ? "Item atualizado." : "Item adicionado. Pronto para o próximo.");
+  resetItemForm();
+  renderDraft();
+}
 
-photoInput.addEventListener("change", async () => {
-  const file = photoInput.files?.[0];
-  if (!file) {
-    currentPhoto = "";
-    renderPhotoPreview();
-    return;
-  }
-
-  currentPhoto = await resizeImage(file);
-  renderPhotoPreview();
-});
-
-itemsList.addEventListener("click", (event) => {
+function handleDraftItemAction(event) {
   const button = event.target.closest("button");
   const card = event.target.closest(".item-card");
   if (!button || !card) return;
-
-  const item = items.find((entry) => entry.id === card.dataset.id);
+  const item = draft.items.find((entry) => entry.id === card.dataset.id);
   if (!item) return;
 
   if (button.classList.contains("remove")) {
-    items = items.filter((entry) => entry.id !== item.id);
-    saveItems();
-    render();
-    return;
+    if (!confirm(`Excluir ${item.description}?`)) return;
+    draft.items = draft.items.filter((entry) => entry.id !== item.id);
+    persistDraft();
+    renderDraft();
   }
 
   if (button.classList.contains("edit")) {
-    editingId = item.id;
+    editingItemId = item.id;
     barcodeInput.value = item.barcode;
     descriptionInput.value = item.description;
     quantityInput.value = item.quantity;
     currentPhoto = item.photo;
     renderPhotoPreview();
-    form.querySelector(".primary-action").textContent = "Salvar item";
+    form.querySelector(".primary-action").textContent = "Salvar alteração";
     barcodeInput.focus();
   }
-});
+}
 
-searchInput.addEventListener("input", render);
-clearFormButton.addEventListener("click", resetForm);
+function saveConference() {
+  saveDraftHeader();
+  if (!draft.invoice) return showMessage("#conferenceStatus", "Informe o nome ou número da nota.", invoiceInput);
+  if (!draft.inspector) return showMessage("#conferenceStatus", "Informe o nome do conferente.", inspectorInput);
+  if (!draft.items.length) return showMessage("#conferenceStatus", "Adicione pelo menos um item à conferência.");
 
-clearAllButton.addEventListener("click", () => {
-  if (!items.length) return;
-  const confirmed = window.confirm("Apagar todos os itens conferidos?");
-  if (!confirmed) return;
-  items = [];
-  saveItems();
-  render();
-});
+  const now = new Date().toISOString();
+  const record = {
+    ...draft,
+    id: draft.id || makeId(),
+    savedAt: now,
+    updatedAt: now
+  };
+  const existingIndex = conferences.findIndex((entry) => entry.id === record.id);
+  if (existingIndex >= 0) conferences[existingIndex] = record;
+  else conferences.unshift(record);
 
-exportCsvButton.addEventListener("click", () => {
-  const rows = [
-    ["codigo", "descricao", "quantidade", "atualizado_em"],
-    ...items.map((item) => [
-      item.barcode,
-      item.description,
-      String(item.quantity),
-      formatDate(item.updatedAt)
-    ])
+  if (!writeJson(conferencesKey, conferences, "#conferenceStatus")) return;
+  localStorage.removeItem(draftKey);
+  draft = blankDraft();
+  syncDraftFields();
+  resetItemForm();
+  renderAll();
+  showView("history");
+}
+
+function startNewConference() {
+  const hasContent = draft.invoice || draft.inspector || draft.items.length;
+  if (hasContent && !confirm("Limpar a conferência atual e iniciar outra?")) return;
+  draft = blankDraft();
+  localStorage.removeItem(draftKey);
+  syncDraftFields();
+  resetItemForm();
+  renderDraft();
+}
+
+function handleConferenceAction(event) {
+  const button = event.target.closest("button");
+  const card = event.target.closest(".conference-card");
+  if (!button || !card) return;
+  const conference = conferences.find((entry) => entry.id === card.dataset.id);
+  if (!conference) return;
+
+  if (button.classList.contains("open-conference")) openConference(conference);
+  if (button.classList.contains("export-excel")) exportExcel(conference);
+  if (button.classList.contains("export-pdf")) exportPdf(conference);
+  if (button.classList.contains("delete-conference")) deleteConference(conference);
+}
+
+function openConference(conference) {
+  const hasOtherDraft = (draft.invoice || draft.inspector || draft.items.length) && draft.id !== conference.id;
+  if (hasOtherDraft && !confirm("Substituir o rascunho atual por esta conferência?")) return;
+  draft = JSON.parse(JSON.stringify(conference));
+  persistDraft();
+  syncDraftFields();
+  renderDraft();
+  showView("new");
+}
+
+function deleteConference(conference) {
+  if (!confirm(`Excluir definitivamente a conferência ${conference.invoice}?`)) return;
+  conferences = conferences.filter((entry) => entry.id !== conference.id);
+  writeJson(conferencesKey, conferences);
+  renderAll();
+}
+
+async function exportExcel(conference) {
+  if (!window.ExcelJS) {
+    alert("O recurso de Excel não carregou. Verifique a internet e tente novamente.");
+    return;
+  }
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Conferência", { views: [{ state: "frozen", ySplit: 5 }] });
+  sheet.columns = [
+    { key: "code", width: 22 }, { key: "description", width: 42 }, { key: "quantity", width: 14 },
+    { key: "date", width: 22 }, { key: "photo", width: 22 }
   ];
+  sheet.addRow(["CONFERÊNCIA DE MERCADORIAS"]);
+  sheet.mergeCells("A1:E1");
+  sheet.getCell("A1").font = { bold: true, size: 16, color: { argb: "FF0F766E" } };
+  sheet.addRow(["Nota", conference.invoice]);
+  sheet.addRow(["Conferente", conference.inspector]);
+  sheet.addRow(["Salva em", formatDate(conference.savedAt || conference.updatedAt)]);
+  const header = sheet.addRow(["Código", "Descrição", "Quantidade", "Registrado em", "Foto"]);
+  header.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  header.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F766E" } };
 
-  const csv = rows
-    .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
-    .join("\n");
-
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `conferencia-${new Date().toISOString().slice(0, 10)}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
-});
-
-stopScanButton.addEventListener("click", stopScanner);
-barcodePhotoInput.addEventListener("change", readBarcodeFromCapturedPhoto);
-
-async function startScanner() {
-  if (!navigator.mediaDevices?.getUserMedia || !window.isSecureContext) {
-    openBarcodePhotoCapture();
-    return;
-  }
-
-  if (!detector && window.Html5Qrcode) {
-    await startHtml5QrcodeScanner();
-    return;
-  }
-
-  if (!detector) {
-    openBarcodePhotoCapture();
-    return;
-  }
-
-  try {
-    setScanStatus("Aponte a câmera para o código de barras.");
-    scanStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" },
-      audio: false
-    });
-    scannerVideo.srcObject = scanStream;
-    await scannerVideo.play();
-    scannerVideo.hidden = false;
-    scannerFallback.hidden = true;
-    startScanButton.disabled = true;
-    stopScanButton.disabled = false;
-    scanTimer = window.setInterval(detectBarcode, 350);
-  } catch (error) {
-    openBarcodePhotoCapture();
-  }
-}
-
-async function startHtml5QrcodeScanner() {
-  try {
-    setScanStatus("Aponte a câmera traseira para o código de barras.");
-    scannerFallback.hidden = true;
-    scannerVideo.hidden = true;
-    barcodeReader.classList.add("active");
-    barcodeReader.setAttribute("aria-hidden", "false");
-    startScanButton.disabled = true;
-    stopScanButton.disabled = false;
-
-    html5Scanner = new Html5Qrcode(barcodeReaderId, {
-      formatsToSupport: getHtml5BarcodeFormats()
-    });
-
-    await html5Scanner.start(
-      { facingMode: "environment" },
-      { fps: 8, qrbox: { width: 280, height: 160 }, disableFlip: true },
-      (decodedText) => handleBarcodeRead(decodedText)
-    );
-  } catch (error) {
-    stopScanner();
-    openBarcodePhotoCapture();
-  }
-}
-
-function openBarcodePhotoCapture() {
-  setScanStatus("Tire uma foto nítida do código de barras.");
-  barcodePhotoInput.value = "";
-  barcodePhotoInput.click();
-}
-
-async function readBarcodeFromCapturedPhoto() {
-  const file = barcodePhotoInput.files?.[0];
-  if (!file) return;
-
-  try {
-    setScanStatus("Lendo código da foto...");
-    const rawValue = await decodeBarcodeFromFile(file);
-
-    if (!rawValue) {
-      setScanStatus("Não encontrei o código. Fotografe mais perto, com o código reto e bem iluminado.");
-      barcodeInput.focus();
-      return;
+  conference.items.forEach((item) => {
+    const row = sheet.addRow([item.barcode, item.description, item.quantity, formatDate(item.updatedAt), ""]);
+    row.height = 72;
+    if (item.photo?.startsWith("data:image")) {
+      try {
+        const imageId = workbook.addImage({ base64: item.photo, extension: item.photo.includes("image/png") ? "png" : "jpeg" });
+        sheet.addImage(imageId, { tl: { col: 4.08, row: row.number - 0.92 }, ext: { width: 120, height: 88 } });
+      } catch (error) { row.getCell(5).value = "Foto não incorporada"; }
     }
-
-    handleBarcodeRead(rawValue);
-  } catch (error) {
-    setScanStatus("Não consegui ler essa foto. Digite o código ou tente outra imagem.");
-    barcodeInput.focus();
-  }
-}
-
-async function detectBarcode() {
-  if (!detector || scannerVideo.readyState < 2) return;
-
-  try {
-    const codes = await detector.detect(scannerVideo);
-    const rawValue = codes[0]?.rawValue?.trim();
-    if (!rawValue || rawValue === lastDetectedCode) return;
-
-    lastDetectedCode = rawValue;
-    handleBarcodeRead(rawValue);
-    setTimeout(() => {
-      lastDetectedCode = "";
-    }, 1800);
-  } catch (error) {
-    stopScanner();
-  }
-}
-
-function stopScanner() {
-  if (scanTimer) {
-    window.clearInterval(scanTimer);
-    scanTimer = null;
-  }
-
-  if (scanStream) {
-    scanStream.getTracks().forEach((track) => track.stop());
-    scanStream = null;
-  }
-
-  scannerVideo.pause();
-  scannerVideo.srcObject = null;
-  scannerVideo.hidden = true;
-  if (html5Scanner) {
-    const scanner = html5Scanner;
-    html5Scanner = null;
-    scanner.stop().catch(() => {}).finally(() => scanner.clear().catch(() => {}));
-  }
-  barcodeReader.classList.remove("active");
-  barcodeReader.setAttribute("aria-hidden", "true");
-  scannerFallback.hidden = false;
-  startScanButton.disabled = false;
-  stopScanButton.disabled = true;
-  setScanStatus("");
-}
-
-function handleBarcodeRead(rawValue) {
-  const barcode = rawValue?.trim();
-  if (!barcode) return;
-
-  barcodeInput.value = barcode;
-  setScanStatus(`Código lido: ${barcode}`);
-  startScanButton.classList.remove("ready-next");
-  stopScanner();
-  setScanStatus(`Código lido: ${barcode}`);
-  descriptionInput.focus();
-}
-
-function render() {
-  const query = searchInput.value.trim().toLowerCase();
-  const filteredItems = items.filter((item) => {
-    return (
-      item.barcode.toLowerCase().includes(query) ||
-      item.description.toLowerCase().includes(query)
-    );
   });
+  sheet.eachRow((row) => row.eachCell((cell) => { cell.alignment = { vertical: "middle", wrapText: true }; }));
+  const buffer = await workbook.xlsx.writeBuffer();
+  downloadBlob(buffer, `${safeName(conference.invoice)}.xlsx`, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+}
 
-  itemsList.innerHTML = "";
-  emptyState.hidden = filteredItems.length > 0;
+function exportPdf(conference) {
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) return alert("Permita a abertura de janelas para gerar o PDF.");
+  const rows = conference.items.map((item) => `
+    <tr><td>${escapeHtml(item.barcode)}</td><td><strong>${escapeHtml(item.description)}</strong></td>
+    <td>${item.quantity}</td><td>${item.photo ? `<img src="${item.photo}" alt="Foto">` : "Sem foto"}</td></tr>`).join("");
+  printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(conference.invoice)}</title>
+    <style>@page{size:A4;margin:12mm}body{font:12px Arial;color:#1f2933}h1{color:#0f766e;margin-bottom:8px}.meta{margin:3px 0}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #cbd5e1;padding:7px;text-align:left;vertical-align:middle}th{background:#0f766e;color:white}img{width:110px;height:82px;object-fit:cover}.footer{margin-top:12px;color:#64748b}@media print{button{display:none}}</style></head><body>
+    <h1>Conferência de mercadorias</h1><p class="meta"><b>Nota:</b> ${escapeHtml(conference.invoice)}</p>
+    <p class="meta"><b>Conferente:</b> ${escapeHtml(conference.inspector)}</p><p class="meta"><b>Data:</b> ${formatDate(conference.savedAt || conference.updatedAt)}</p>
+    <table><thead><tr><th>Código</th><th>Descrição</th><th>Qtd.</th><th>Foto</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="footer">${conference.items.length} itens · ${sumUnits(conference.items)} unidades</p>
+    <script>window.onload=()=>setTimeout(()=>window.print(),500)<\/script></body></html>`);
+  printWindow.document.close();
+}
 
-  filteredItems.forEach((item) => {
+function renderAll() {
+  renderDraft();
+  renderHistory();
+  $("#totalConferences").textContent = conferences.length;
+  $("#totalItems").textContent = conferences.reduce((sum, entry) => sum + entry.items.length, 0);
+}
+
+function renderDraft() {
+  draftItems.innerHTML = "";
+  draftEmpty.hidden = draft.items.length > 0;
+  draft.items.forEach((item) => {
     const node = itemTemplate.content.firstElementChild.cloneNode(true);
     node.dataset.id = item.id;
     node.querySelector("h3").textContent = item.description;
     node.querySelector(".qty-pill").textContent = `${item.quantity} un.`;
     node.querySelector(".code-line").textContent = `Código: ${item.barcode}`;
-    node.querySelector(".date-line").textContent = `Atualizado: ${formatDate(item.updatedAt)}`;
-
-    const thumb = node.querySelector(".thumb");
     if (item.photo) {
-      const image = document.createElement("img");
-      image.alt = item.description;
-      image.src = item.photo;
-      thumb.append(image);
+      const image = new Image(); image.src = item.photo; image.alt = item.description;
+      node.querySelector(".thumb").append(image);
     }
-
-    itemsList.append(node);
+    draftItems.append(node);
   });
+  $("#draftCount").textContent = `${draft.items.length} ${draft.items.length === 1 ? "item" : "itens"}`;
+  $("#draftUnits").textContent = `${sumUnits(draft.items)} unidades`;
+  updateDraftTitle();
+}
 
-  totalItems.textContent = String(items.length);
-  totalUnits.textContent = String(items.reduce((sum, item) => sum + item.quantity, 0));
+function renderHistory() {
+  const query = searchInput.value.trim().toLocaleLowerCase("pt-BR");
+  const filtered = conferences.filter((entry) => [entry.invoice, entry.inspector, ...entry.items.flatMap((item) => [item.barcode, item.description])]
+    .some((value) => String(value).toLocaleLowerCase("pt-BR").includes(query)));
+  conferenceList.innerHTML = "";
+  historyEmpty.hidden = filtered.length > 0;
+  filtered.forEach((conference) => {
+    const node = conferenceTemplate.content.firstElementChild.cloneNode(true);
+    node.dataset.id = conference.id;
+    node.querySelector(".card-date").textContent = formatDate(conference.savedAt || conference.updatedAt);
+    node.querySelector(".card-invoice").textContent = conference.invoice;
+    node.querySelector(".card-inspector").textContent = `Conferente: ${conference.inspector}`;
+    node.querySelector(".card-summary").textContent = `${conference.items.length} itens · ${sumUnits(conference.items)} unidades`;
+    conferenceList.append(node);
+  });
+}
+
+function syncDraftFields() {
+  invoiceInput.value = draft.invoice || "";
+  inspectorInput.value = draft.inspector || "";
+  updateDraftTitle();
+}
+
+function updateDraftTitle() {
+  $("#draftTitle").textContent = draft.id ? `Editando: ${draft.invoice}` : "Nova conferência";
+}
+
+function resetItemForm() {
+  editingItemId = null;
+  currentPhoto = "";
+  form.reset();
+  quantityInput.value = 1;
+  form.querySelector(".primary-action").textContent = "Adicionar item";
+  renderPhotoPreview();
 }
 
 function renderPhotoPreview() {
-  photoPreview.innerHTML = "";
-  if (!currentPhoto) {
-    const text = document.createElement("span");
-    text.textContent = "Sem foto";
-    photoPreview.append(text);
-    return;
-  }
-
-  const image = document.createElement("img");
-  image.alt = "Foto da mercadoria";
-  image.src = currentPhoto;
-  photoPreview.append(image);
+  photoPreview.innerHTML = currentPhoto ? `<img src="${currentPhoto}" alt="Foto da mercadoria">` : "<span>Sem foto</span>";
 }
 
-function resetForm() {
-  editingId = null;
-  currentPhoto = "";
-  form.reset();
-  quantityInput.value = "1";
-  form.querySelector(".primary-action").textContent = "Adicionar item";
-  renderPhotoPreview();
-  barcodeInput.focus();
-  startScanButton.classList.add("ready-next");
-}
-
-function loadItems() {
+async function startScanner() {
+  if (!window.isSecureContext || !window.Html5Qrcode) return openPhotoScanner();
   try {
-    return JSON.parse(localStorage.getItem(storageKey)) || [];
+    scanner = new Html5Qrcode("barcodeReader");
+    barcodeReader.classList.add("active");
+    scannerFallback.hidden = true;
+    startScanButton.disabled = true;
+    stopScanButton.disabled = false;
+    setScanStatus("Aponte a câmera para o código.");
+    await scanner.start({ facingMode: "environment" }, { fps: 8, qrbox: { width: 280, height: 150 } }, handleBarcode);
   } catch (error) {
-    return [];
+    await stopScanner();
+    openPhotoScanner();
   }
 }
 
-function saveItems() {
-  localStorage.setItem(storageKey, JSON.stringify(items));
+async function stopScanner() {
+  if (scanner) {
+    try { await scanner.stop(); } catch (error) { /* scanner ainda não iniciado */ }
+    try { await scanner.clear(); } catch (error) { /* área já limpa */ }
+    scanner = null;
+  }
+  barcodeReader.classList.remove("active");
+  scannerFallback.hidden = false;
+  startScanButton.disabled = false;
+  stopScanButton.disabled = true;
 }
 
-function formatDate(value) {
-  return new Intl.DateTimeFormat("pt-BR", {
-    dateStyle: "short",
-    timeStyle: "short"
-  }).format(new Date(value));
+function openPhotoScanner() {
+  setScanStatus("Fotografe o código de barras de perto.");
+  barcodePhotoInput.value = "";
+  barcodePhotoInput.click();
+}
+
+async function scanCapturedPhoto() {
+  const file = barcodePhotoInput.files?.[0];
+  if (!file || !window.Html5Qrcode) return;
+  const fileScanner = new Html5Qrcode("barcodeReader");
+  try {
+    setScanStatus("Lendo código...");
+    handleBarcode(await fileScanner.scanFile(file, false));
+  } catch (error) {
+    setScanStatus("Não consegui ler. Tente outra foto ou digite o código.");
+  } finally {
+    try { await fileScanner.clear(); } catch (error) { /* nada para limpar */ }
+  }
+}
+
+function handleBarcode(value) {
+  const code = String(value || "").trim();
+  if (!code) return;
+  barcodeInput.value = code;
+  stopScanner();
+  setScanStatus(`Código lido: ${code}`);
+  descriptionInput.focus();
 }
 
 function resizeImage(file) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    reader.onerror = reject;
     reader.onload = () => {
       const image = new Image();
+      image.onerror = reject;
       image.onload = () => {
+        const max = 760;
+        const scale = Math.min(1, max / Math.max(image.width, image.height));
         const canvas = document.createElement("canvas");
-        const maxSize = 920;
-        const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
         canvas.width = Math.round(image.width * scale);
         canvas.height = Math.round(image.height * scale);
-        const context = canvas.getContext("2d");
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", 0.78));
+        canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.68));
       };
       image.src = reader.result;
     };
@@ -437,263 +392,32 @@ function resizeImage(file) {
   });
 }
 
-async function decodeBarcodeFromFile(file) {
-  const libraryResult = await decodeWithHtml5Qrcode(file);
-  if (libraryResult) return libraryResult;
-
-  const quaggaResult = await decodeWithQuagga(file);
-  if (quaggaResult) return quaggaResult;
-
-  if (!detector) return "";
-
-  const image = await fileToImage(file);
-  return decodeBarcodeFromImage(image);
+function persistDraft() { return writeJson(draftKey, draft, "#formStatus"); }
+function blankDraft() { return { id: null, invoice: "", inspector: "", items: [], startedAt: new Date().toISOString() }; }
+function sumUnits(items) { return items.reduce((sum, item) => sum + Number(item.quantity || 0), 0); }
+function makeId() { return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
+function formatDate(value) { return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)); }
+function safeName(value) { return String(value).replace(/[\\/:*?"<>|]+/g, "-").trim() || "conferencia"; }
+function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char])); }
+function readJson(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch (error) { return fallback; } }
+function writeJson(key, value, statusSelector) {
+  try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+  catch (error) { showMessage(statusSelector || "#conferenceStatus", "Memória cheia. Exporte ou exclua conferências antigas."); return false; }
 }
-
-async function decodeWithHtml5Qrcode(file) {
-  if (!window.Html5Qrcode) {
-    setScanStatus("Leitor extra não carregou. Verifique a internet do celular e atualize a página.");
-    return "";
-  }
-
-  let scanner = null;
-  try {
-    scanner = new Html5Qrcode(barcodeReaderId, {
-      formatsToSupport: getHtml5BarcodeFormats()
-    });
-    const decodedText = await scanner.scanFile(file, false);
-    return decodedText?.trim() || "";
-  } catch (error) {
-    return "";
-  } finally {
-    if (scanner) {
-      try {
-        await scanner.clear();
-      } catch (error) {
-        // Some versions only need clear() after live camera scanning.
-      }
-    }
-  }
+function downloadBlob(data, filename, type) {
+  const url = URL.createObjectURL(new Blob([data], { type }));
+  const link = document.createElement("a"); link.href = url; link.download = filename; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-
-function getHtml5BarcodeFormats() {
-  if (!window.Html5QrcodeSupportedFormats) return undefined;
-
-  return [
-    Html5QrcodeSupportedFormats.EAN_13,
-    Html5QrcodeSupportedFormats.EAN_8,
-    Html5QrcodeSupportedFormats.UPC_A,
-    Html5QrcodeSupportedFormats.UPC_E,
-    Html5QrcodeSupportedFormats.CODE_128,
-    Html5QrcodeSupportedFormats.CODE_39,
-    Html5QrcodeSupportedFormats.CODE_93,
-    Html5QrcodeSupportedFormats.ITF,
-    Html5QrcodeSupportedFormats.QR_CODE
-  ].filter((format) => typeof format !== "undefined");
+function showMessage(selector, text, focusTarget) {
+  const element = $(selector); element.textContent = text;
+  if (focusTarget) { focusTarget.focus(); focusTarget.scrollIntoView({ behavior: "smooth", block: "center" }); }
+  clearTimeout(messageTimer); messageTimer = setTimeout(() => { element.textContent = ""; }, 5000);
+  return false;
 }
-
-async function decodeWithQuagga(file) {
-  if (!window.Quagga) return "";
-
-  const src = await fileToDataUrl(file);
-  const attempts = [
-    { locate: true, size: 1280 },
-    { locate: true, size: 960 },
-    { locate: false, size: 1280 },
-    { locate: false, size: 720 }
-  ];
-
-  for (const attempt of attempts) {
-    const result = await decodeQuaggaAttempt(src, attempt);
-    if (result) return result;
-  }
-
-  return "";
-}
-
-function decodeQuaggaAttempt(src, attempt) {
-  return new Promise((resolve) => {
-    Quagga.decodeSingle(
-      {
-        src,
-        numOfWorkers: 0,
-        locate: attempt.locate,
-        inputStream: {
-          size: attempt.size,
-          singleChannel: false
-        },
-        locator: {
-          patchSize: "medium",
-          halfSample: true
-        },
-        decoder: {
-          readers: [
-            "ean_reader",
-            "ean_8_reader",
-            "upc_reader",
-            "upc_e_reader",
-            "code_128_reader",
-            "code_39_reader",
-            "i2of5_reader"
-          ],
-          multiple: false
-        }
-      },
-      (result) => {
-        const code = result?.codeResult?.code?.trim();
-        resolve(code || "");
-      }
-    );
-  });
-}
-
-async function setupBarcodeDetector() {
-  if (!("BarcodeDetector" in window)) {
-    startScanButton.title = "Este navegador não oferece leitura automática. Use o campo manual.";
-    setScanStatus("Toque em Ler código para abrir a câmera do celular.");
-    return;
-  }
-
-  const preferredFormats = ["ean_13", "ean_8", "code_128", "code_39", "upc_a", "upc_e", "qr_code"];
-  let formats = preferredFormats;
-
-  if (BarcodeDetector.getSupportedFormats) {
-    const supportedFormats = await BarcodeDetector.getSupportedFormats();
-    formats = preferredFormats.filter((format) => supportedFormats.includes(format));
-  }
-
-  if (!formats.length) {
-    startScanButton.title = "Este navegador abre a câmera, mas não lê esses códigos automaticamente.";
-    setScanStatus("A câmera abre, mas este navegador não lê código automaticamente.");
-    return;
-  }
-
-  detector = new BarcodeDetector({ formats });
-  setScanStatus("Toque em Ler código e fotografe o código de barras.");
-}
-
-async function decodeBarcodeFromImage(image) {
-  const attempts = makeBarcodeCanvases(image);
-
-  for (const canvas of attempts) {
-    const codes = await detector.detect(canvas);
-    const rawValue = codes[0]?.rawValue?.trim();
-    if (rawValue) return rawValue;
-  }
-
-  return "";
-}
-
-function makeBarcodeCanvases(image) {
-  const maxWidth = 1400;
-  const scale = Math.min(1, maxWidth / Math.max(image.width, image.height));
-  const width = Math.max(1, Math.round(image.width * scale));
-  const height = Math.max(1, Math.round(image.height * scale));
-  const base = document.createElement("canvas");
-  base.width = width;
-  base.height = height;
-  base.getContext("2d").drawImage(image, 0, 0, width, height);
-
-  const crops = [
-    { x: 0, y: 0, w: width, h: height },
-    { x: 0, y: height * 0.2, w: width, h: height * 0.6 },
-    { x: width * 0.08, y: height * 0.25, w: width * 0.84, h: height * 0.5 },
-    { x: width * 0.15, y: height * 0.15, w: width * 0.7, h: height * 0.7 }
-  ];
-
-  const canvases = [];
-  crops.forEach((crop) => {
-    const cropped = cropCanvas(base, crop);
-    canvases.push(cropped, enhanceContrast(cropped));
-    canvases.push(rotateCanvas(cropped, 90), rotateCanvas(cropped, 270));
-  });
-
-  return canvases;
-}
-
-function cropCanvas(source, crop) {
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(crop.w));
-  canvas.height = Math.max(1, Math.round(crop.h));
-  canvas.getContext("2d").drawImage(
-    source,
-    Math.round(crop.x),
-    Math.round(crop.y),
-    canvas.width,
-    canvas.height,
-    0,
-    0,
-    canvas.width,
-    canvas.height
-  );
-  return canvas;
-}
-
-function rotateCanvas(source, degrees) {
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d");
-  const radians = degrees * Math.PI / 180;
-  const sideways = degrees === 90 || degrees === 270;
-  canvas.width = sideways ? source.height : source.width;
-  canvas.height = sideways ? source.width : source.height;
-  context.translate(canvas.width / 2, canvas.height / 2);
-  context.rotate(radians);
-  context.drawImage(source, -source.width / 2, -source.height / 2);
-  return canvas;
-}
-
-function enhanceContrast(source) {
-  const canvas = document.createElement("canvas");
-  canvas.width = source.width;
-  canvas.height = source.height;
-  const context = canvas.getContext("2d");
-  context.drawImage(source, 0, 0);
-  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data;
-
-  for (let index = 0; index < data.length; index += 4) {
-    const gray = data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
-    const value = gray > 145 ? 255 : 0;
-    data[index] = value;
-    data[index + 1] = value;
-    data[index + 2] = value;
-  }
-
-  context.putImageData(imageData, 0, 0);
-  return canvas;
-}
-
-function fileToImage(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const image = new Image();
-      image.onload = () => resolve(image);
-      image.onerror = reject;
-      image.src = reader.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-function setScanStatus(message) {
-  scanStatus.textContent = message;
-}
-
-function showFormStatus(message) {
-  formStatus.textContent = message;
-  window.clearTimeout(statusTimer);
-  statusTimer = window.setTimeout(() => {
-    formStatus.textContent = "";
-  }, 3200);
+function setScanStatus(text) { $("#scanStatus").textContent = text; }
+function migrateOldItems() {
+  if (draft.items.length || conferences.length) return;
+  const oldItems = readJson("conferencia-mercadorias-v1", []);
+  if (oldItems.length) { draft.items = oldItems; persistDraft(); }
 }
