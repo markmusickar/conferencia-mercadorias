@@ -20,21 +20,38 @@
         </div>
         <div class="summary-strip" aria-label="Resumo geral">
           <span><strong id="totalConferences">0</strong> conferências</span>
+          <span><strong id="totalOrders">0</strong> pedidos</span>
           <span><strong id="totalItems">0</strong> itens</span>
         </div>
       </header>
 
+      <section class="session-panel panel">
+        <div>
+          <p class="eyebrow">Acesso provisório</p>
+          <h2 id="sessionTitle">Escolha seu perfil</h2>
+          <p id="sessionHint">Depois vamos trocar isso por login com senha. Agora serve para desenhar o fluxo correto.</p>
+        </div>
+        <div class="role-buttons" aria-label="Perfis do sistema">
+          <button type="button" class="role-button" data-role="conferente">Conferente</button>
+          <button type="button" class="role-button" data-role="compras">Compras</button>
+          <button type="button" class="role-button" data-role="admin">Administrador</button>
+        </div>
+      </section>
+
       <nav class="main-tabs" aria-label="Navegação principal">
         <button type="button" class="tab-button active" data-view="new">Nova conferência</button>
         <button type="button" class="tab-button" data-view="history">Conferências</button>
+        <button type="button" class="tab-button" data-view="orders">Pedidos de compra</button>
+        <button type="button" class="tab-button" data-view="compare">Comparar</button>
       </nav>
 
       <section id="newView" class="view active">
         <section class="conference-header panel">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Identificação</p>
+              <p class="eyebrow">Conferência às cegas</p>
               <h2 id="draftTitle">Nova conferência</h2>
+              <p class="help-text">O conferente registra o que chegou sem enxergar o pedido de compra.</p>
             </div>
             <button type="button" id="newConference" class="secondary-action small">Limpar e iniciar nova</button>
           </div>
@@ -54,7 +71,7 @@
           <form id="itemForm" class="entry-panel panel" autocomplete="off" novalidate>
             <div class="section-heading item-heading">
               <div>
-                <p class="eyebrow">Mercadoria</p>
+                <p class="eyebrow">Mercadoria recebida</p>
                 <h2>Adicionar item</h2>
               </div>
               <span id="draftCount" class="count-pill">0 itens</span>
@@ -120,6 +137,87 @@
             <p>As conferências salvas aparecerão aqui.</p>
           </div>
           <div id="conferenceList" class="conference-list"></div>
+        </section>
+      </section>
+
+      <section id="ordersView" class="view">
+        <section class="workspace">
+          <form id="orderForm" class="entry-panel panel" autocomplete="off" novalidate>
+            <div class="section-heading item-heading">
+              <div>
+                <p class="eyebrow">Compras</p>
+                <h2 id="orderTitle">Novo pedido de compra</h2>
+              </div>
+              <button type="button" id="newOrder" class="secondary-action small">Novo pedido</button>
+            </div>
+            <label>Número ou nome do pedido<input id="orderNumber" placeholder="Ex.: PC 2026-001" required></label>
+            <label>Responsável por compras<input id="buyerName" placeholder="Ex.: Ana Compras" required></label>
+            <div class="divider"></div>
+            <p class="eyebrow">Item do pedido</p>
+            <label>Código de barras<input id="orderBarcode" inputmode="numeric" placeholder="7890000000000" required></label>
+            <label>Descrição<input id="orderDescription" placeholder="Ex.: Caixa de parafusos 10 mm" required></label>
+            <label>Quantidade pedida<input id="orderQuantity" type="number" min="1" step="1" value="1" required></label>
+            <div class="action-row">
+              <button type="submit" class="primary-action">Adicionar item</button>
+              <button type="button" id="clearOrderItem" class="secondary-action">Limpar item</button>
+            </div>
+            <p id="orderStatus" class="form-status" role="status"></p>
+          </form>
+
+          <section class="list-panel panel">
+            <div class="section-heading">
+              <div><p class="eyebrow">Pedido atual</p><h2>Itens comprados</h2></div>
+              <span id="orderUnits" class="count-pill">0 unidades</span>
+            </div>
+            <div id="orderItemsEmpty" class="empty-state compact-empty">
+              <strong>Nenhum item no pedido.</strong>
+              <p>Cadastre os itens que deveriam chegar.</p>
+            </div>
+            <div id="orderItems" class="items-list"></div>
+            <div class="save-conference-bar">
+              <button type="button" id="saveOrder" class="primary-action save-conference">Salvar pedido de compra</button>
+              <p id="saveOrderStatus" class="form-status" role="status"></p>
+            </div>
+          </section>
+        </section>
+
+        <section class="panel history-panel below-panel">
+          <div class="section-heading history-heading">
+            <div><p class="eyebrow">Base de compras</p><h2>Pedidos salvos</h2></div>
+          </div>
+          <div class="search-row">
+            <input id="orderSearch" type="search" placeholder="Pesquisar pedido, comprador, código ou descrição">
+          </div>
+          <div id="ordersEmpty" class="empty-state">
+            <strong>Nenhum pedido encontrado.</strong>
+            <p>Os pedidos de compra salvos aparecerão aqui.</p>
+          </div>
+          <div id="ordersList" class="conference-list"></div>
+        </section>
+      </section>
+
+      <section id="compareView" class="view">
+        <section class="panel history-panel">
+          <div class="section-heading history-heading">
+            <div>
+              <p class="eyebrow">Auditoria</p>
+              <h2>Comparar pedido x conferência</h2>
+              <p class="help-text">Só administrador vê esta tela. O conferente continua sem acesso ao pedido.</p>
+            </div>
+          </div>
+          <div class="compare-grid">
+            <label>Pedido de compra<select id="compareOrder"></select></label>
+            <label>Conferência recebida<select id="compareConference"></select></label>
+          </div>
+          <div class="button-row">
+            <button type="button" id="runCompare" class="primary-action">Comparar agora</button>
+            <button type="button" id="exportComparePdf" class="tool-button">PDF da comparação</button>
+          </div>
+          <div id="compareEmpty" class="empty-state compact-empty">
+            <strong>Escolha um pedido e uma conferência.</strong>
+            <p>O sistema mostra falta, sobra e quantidade divergente.</p>
+          </div>
+          <div id="compareResult" class="compare-result"></div>
         </section>
       </section>
     </main>
