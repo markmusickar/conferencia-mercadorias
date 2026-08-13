@@ -1,5 +1,6 @@
 const supabaseUrl = "https://upozyqpdmxhhnynqoefs.supabase.co";
 const supabaseKey = "sb_publishable_CyoDQRGvNzohmPjijToDAQ_9zYdIcIy";
+const defaultLoginDomain = "lojaosuper20cupira.com.br";
 const supabaseClient = window.supabase?.createClient(supabaseUrl, supabaseKey);
 
 const keys = {
@@ -77,11 +78,11 @@ async function boot() {
 
 async function login(event) {
   event.preventDefault();
-  const email = $("#loginEmail").value.trim();
+  const email = normalizeLogin($("#loginEmail").value);
   const password = $("#loginPassword").value;
   showMessage("#loginStatus", "Entrando...");
   const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-  if (error) return showMessage("#loginStatus", "E-mail ou senha inválidos.");
+  if (error) return showMessage("#loginStatus", "Usuário ou senha inválidos.");
   await enterApp(data.user);
 }
 
@@ -938,4 +939,8 @@ function setScanStatus(text) { $("#scanStatus").textContent = text; }
 function styleHeader(row) {
   row.font = { bold: true, color: { argb: "FFFFFFFF" } };
   row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F766E" } };
+}
+function normalizeLogin(value) {
+  const login = String(value || "").trim().toLowerCase();
+  return login.includes("@") ? login : `${login}@${defaultLoginDomain}`;
 }
