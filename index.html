@@ -12,7 +12,19 @@
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
-    <main class="app-shell">
+    <section id="loginView" class="login-view">
+      <form id="loginForm" class="login-card panel">
+        <p class="eyebrow">Acesso ao sistema</p>
+        <h1>Entrar na conferência</h1>
+        <p class="help-text">Use o usuário criado no Supabase. Cada perfil vê somente sua área.</p>
+        <label>E-mail<input id="loginEmail" type="email" autocomplete="email" placeholder="seu@email.com" required></label>
+        <label>Senha<input id="loginPassword" type="password" autocomplete="current-password" placeholder="Sua senha" required></label>
+        <button type="submit" class="primary-action login-button">Entrar</button>
+        <p id="loginStatus" class="form-status" role="status"></p>
+      </form>
+    </section>
+
+    <main id="appShell" class="app-shell app-hidden">
       <header class="topbar">
         <div>
           <p class="eyebrow">Coletor de dados</p>
@@ -27,14 +39,13 @@
 
       <section class="session-panel panel">
         <div>
-          <p class="eyebrow">Acesso provisório</p>
-          <h2 id="sessionTitle">Escolha seu perfil</h2>
-          <p id="sessionHint">Depois vamos trocar isso por login com senha. Agora serve para desenhar o fluxo correto.</p>
+          <p class="eyebrow">Usuário logado</p>
+          <h2 id="sessionTitle">Carregando perfil</h2>
+          <p id="sessionHint">O acesso agora vem do Supabase com perfil de conferente, compras ou administrador.</p>
         </div>
-        <div class="role-buttons" aria-label="Perfis do sistema">
-          <button type="button" class="role-button" data-role="conferente">Conferente</button>
-          <button type="button" class="role-button" data-role="compras">Compras</button>
-          <button type="button" class="role-button" data-role="admin">Administrador</button>
+        <div class="role-buttons" aria-label="Sessão do sistema">
+          <span id="roleBadge" class="role-badge">perfil</span>
+          <button type="button" id="logoutButton" class="secondary-action small">Sair</button>
         </div>
       </section>
 
@@ -254,6 +265,7 @@
     </template>
 
     <script src="https://unpkg.com/html5-qrcode" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js" crossorigin="anonymous"></script>
     <script src="app.js"></script>
   </body>

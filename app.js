@@ -1,22 +1,23 @@
+const supabaseUrl = "https://upozyqpdmxhhnynqoefs.supabase.co";
+const supabaseKey = "sb_publishable_CyoDQRGvNzohmPjijToDAQ_9zYdIcIy";
+const supabaseClient = window.supabase?.createClient(supabaseUrl, supabaseKey);
+
 const keys = {
-  conferences: "conferencia-mercadorias-v3",
-  draft: "conferencia-rascunho-v3",
-  orders: "pedidos-compra-v1",
-  orderDraft: "pedido-compra-rascunho-v1",
-  session: "conferencia-sessao-v1"
+  draft: "conferencia-rascunho-online-v1",
+  orderDraft: "pedido-compra-rascunho-online-v1"
 };
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
-
 const blankConference = () => ({ id: null, invoice: "", inspector: "", items: [], startedAt: new Date().toISOString() });
 const blankOrder = () => ({ id: null, number: "", buyer: "", items: [], startedAt: new Date().toISOString() });
 
-let conferences = readJson(keys.conferences, readJson("conferencia-mercadorias-v2", []));
-let orders = readJson(keys.orders, []);
-let draft = readJson(keys.draft, readJson("conferencia-rascunho-v2", blankConference()));
+let currentUser = null;
+let currentProfile = null;
+let conferences = [];
+let orders = [];
+let draft = readJson(keys.draft, blankConference());
 let orderDraft = readJson(keys.orderDraft, blankOrder());
-let session = readJson(keys.session, { role: "admin" });
 let editingItemId = null;
 let editingOrderItemId = null;
 let currentPhoto = "";
@@ -25,14 +26,12 @@ let messageTimer = null;
 let lastComparison = null;
 
 bindEvents();
-syncSession();
-syncDraftFields();
-syncOrderFields();
-renderAll();
+boot();
 
 function bindEvents() {
+  $("#loginForm").addEventListener("submit", login);
+  $("#logoutButton").addEventListener("click", logout);
   $$(".tab-button").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
-  $$(".role-button").forEach((button) => button.addEventListener("click", () => setRole(button.dataset.role)));
 
   $("#goToNew").addEventListener("click", () => showView("new"));
   $("#newConference").addEventListener("click", startNewConference);
@@ -63,26 +62,122 @@ function bindEvents() {
   $("#exportComparePdf").addEventListener("click", exportComparisonPdf);
 }
 
-function setRole(role) {
-  session.role = role;
-  writeJson(keys.session, session);
+async function boot() {
+  if (!supabaseClient) {
+    showLogin("Biblioteca do Supabase não carregou. Verifique a internet.");
+    return;
+  }
+  const { data } = await supabaseClient.auth.getSession();
+  if (!data.session) {
+    showLogin();
+    return;
+  }
+  await enterApp(data.session.user);
+}
+
+async function login(event) {
+  event.preventDefault();
+  const email = $("#loginEmail").value.trim();
+  const password = $("#loginPassword").value;
+  showMessage("#loginStatus", "Entrando...");
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if (error) return showMessage("#loginStatus", "E-mail ou senha inválidos.");
+  await enterApp(data.user);
+}
+
+async function logout() {
+  await supabaseClient.auth.signOut();
+  currentUser = null;
+  currentProfile = null;
+  conferences = [];
+  orders = [];
+  $("#appShell").classList.add("app-hidden");
+  $("#loginView").hidden = false;
+}
+
+async function enterApp(user) {
+  currentUser = user;
+  await loadProfile();
+  $("#loginView").hidden = true;
+  $("#appShell").classList.remove("app-hidden");
   syncSession();
+  syncDraftFields();
+  syncOrderFields();
+  await loadRemoteData();
+  renderAll();
+}
+
+function showLogin(message = "") {
+  $("#loginView").hidden = false;
+  $("#appShell").classList.add("app-hidden");
+  $("#loginStatus").textContent = message;
+}
+
+async function loadProfile() {
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("id,email,role")
+    .eq("id", currentUser.id)
+    .single();
+
+  if (error || !data) {
+    currentProfile = { id: currentUser.id, email: currentUser.email, role: "conferente" };
+    return;
+  }
+  currentProfile = data;
+}
+
+async function loadRemoteData() {
+  await Promise.all([loadConferences(), loadOrders()]);
+}
+
+async function loadConferences() {
+  const { data, error } = await supabaseClient
+    .from("conferences")
+    .select("*, conference_items(*)")
+    .order("created_at", { ascending: false });
+  if (error) {
+    conferences = [];
+    return;
+  }
+  conferences = data.map(mapConferenceFromDb);
+}
+
+async function loadOrders() {
+  if (!canSeeOrders()) {
+    orders = [];
+    return;
+  }
+  const { data, error } = await supabaseClient
+    .from("purchase_orders")
+    .select("*, purchase_order_items(*)")
+    .order("created_at", { ascending: false });
+  if (error) {
+    orders = [];
+    return;
+  }
+  orders = data.map(mapOrderFromDb);
 }
 
 function syncSession() {
   const labels = { conferente: "Conferente", compras: "Compras", admin: "Administrador" };
-  $$(".role-button").forEach((button) => button.classList.toggle("active", button.dataset.role === session.role));
-  $("#sessionTitle").textContent = `Perfil atual: ${labels[session.role] || "Administrador"}`;
+  const role = currentProfile?.role || "conferente";
+  $("#sessionTitle").textContent = `${currentProfile?.email || currentUser?.email || ""}`;
+  $("#roleBadge").textContent = labels[role] || role;
 
   const allowed = {
     conferente: ["new", "history"],
     compras: ["orders"],
     admin: ["new", "history", "orders", "compare"]
-  }[session.role] || ["new", "history", "orders", "compare"];
+  }[role] || ["new", "history"];
 
   $$(".tab-button").forEach((button) => { button.hidden = !allowed.includes(button.dataset.view); });
   const active = $(".tab-button.active");
   if (!active || active.hidden) showView(allowed[0]);
+}
+
+function canSeeOrders() {
+  return ["compras", "admin"].includes(currentProfile?.role);
 }
 
 function showView(name) {
@@ -127,7 +222,7 @@ function addOrUpdateItem(event) {
     draft.items.unshift({ id: makeId(), ...item, createdAt: now, updatedAt: now });
   }
 
-  if (!persistDraft()) return;
+  persistDraft();
   showMessage("#formStatus", editingItemId ? "Item atualizado." : "Item adicionado. Pode registrar o próximo.");
   resetItemForm();
   renderDraft();
@@ -170,23 +265,39 @@ function handleDraftItemAction(event) {
   }
 }
 
-function saveConference() {
+async function saveConference() {
   saveDraftHeader();
   if (!draft.invoice) return showMessage("#conferenceStatus", "Informe o nome ou número da nota.", $("#invoiceNumber"));
   if (!draft.inspector) return showMessage("#conferenceStatus", "Informe o nome do conferente.", $("#inspectorName"));
   if (!draft.items.length) return showMessage("#conferenceStatus", "Adicione pelo menos um item à conferência.");
 
+  showMessage("#conferenceStatus", "Salvando no banco...");
   const now = new Date().toISOString();
-  const record = { ...draft, id: draft.id || makeId(), savedAt: draft.savedAt || now, updatedAt: now };
-  const existingIndex = conferences.findIndex((entry) => entry.id === record.id);
-  if (existingIndex >= 0) conferences[existingIndex] = record;
-  else conferences.unshift(record);
-  if (!writeJson(keys.conferences, conferences, "#conferenceStatus")) return;
+  const payload = {
+    invoice_number: draft.invoice,
+    inspector_name: draft.inspector,
+    status: "salva",
+    created_by: currentUser.id,
+    updated_at: now
+  };
+  if (!draft.id) payload.created_at = draft.startedAt || now;
+
+  const query = draft.id
+    ? supabaseClient.from("conferences").update(payload).eq("id", draft.id).select().single()
+    : supabaseClient.from("conferences").insert(payload).select().single();
+  const { data: conference, error } = await query;
+  if (error) return showMessage("#conferenceStatus", `Erro ao salvar: ${error.message}`);
+
+  await supabaseClient.from("conference_items").delete().eq("conference_id", conference.id);
+  const items = await Promise.all(draft.items.map((item) => mapConferenceItemToDb(item, conference.id)));
+  const { error: itemError } = await supabaseClient.from("conference_items").insert(items);
+  if (itemError) return showMessage("#conferenceStatus", `Erro nos itens: ${itemError.message}`);
 
   localStorage.removeItem(keys.draft);
   draft = blankConference();
   syncDraftFields();
   resetItemForm();
+  await loadConferences();
   renderAll();
   showView("history");
 }
@@ -223,10 +334,11 @@ function openConference(conference) {
   showView("new");
 }
 
-function deleteConference(conference) {
+async function deleteConference(conference) {
   if (!confirm(`Excluir definitivamente a conferência ${conference.invoice}?`)) return;
-  conferences = conferences.filter((entry) => entry.id !== conference.id);
-  writeJson(keys.conferences, conferences);
+  const { error } = await supabaseClient.from("conferences").delete().eq("id", conference.id);
+  if (error) return alert(`Não foi possível excluir: ${error.message}`);
+  await loadConferences();
   renderAll();
 }
 
@@ -253,7 +365,7 @@ function addOrUpdateOrderItem(event) {
   } else {
     orderDraft.items.unshift({ id: makeId(), ...item, createdAt: now, updatedAt: now });
   }
-  if (!persistOrderDraft()) return;
+  persistOrderDraft();
   showMessage("#orderStatus", editingOrderItemId ? "Item do pedido atualizado." : "Item adicionado ao pedido.");
   resetOrderItemForm();
   renderOrderDraft();
@@ -282,23 +394,45 @@ function handleOrderItemAction(event) {
   }
 }
 
-function saveOrder() {
+async function saveOrder() {
   saveOrderHeader();
+  if (!canSeeOrders()) return showMessage("#saveOrderStatus", "Seu perfil não pode salvar pedido de compra.");
   if (!orderDraft.number) return showMessage("#saveOrderStatus", "Informe o número ou nome do pedido.", $("#orderNumber"));
   if (!orderDraft.buyer) return showMessage("#saveOrderStatus", "Informe o responsável por compras.", $("#buyerName"));
   if (!orderDraft.items.length) return showMessage("#saveOrderStatus", "Adicione pelo menos um item ao pedido.");
 
+  showMessage("#saveOrderStatus", "Salvando pedido no banco...");
   const now = new Date().toISOString();
-  const record = { ...orderDraft, id: orderDraft.id || makeId(), savedAt: orderDraft.savedAt || now, updatedAt: now };
-  const existingIndex = orders.findIndex((entry) => entry.id === record.id);
-  if (existingIndex >= 0) orders[existingIndex] = record;
-  else orders.unshift(record);
-  if (!writeJson(keys.orders, orders, "#saveOrderStatus")) return;
+  const payload = {
+    order_number: orderDraft.number,
+    buyer_name: orderDraft.buyer,
+    status: "aberto",
+    created_by: currentUser.id,
+    updated_at: now
+  };
+  if (!orderDraft.id) payload.created_at = orderDraft.startedAt || now;
+
+  const query = orderDraft.id
+    ? supabaseClient.from("purchase_orders").update(payload).eq("id", orderDraft.id).select().single()
+    : supabaseClient.from("purchase_orders").insert(payload).select().single();
+  const { data: order, error } = await query;
+  if (error) return showMessage("#saveOrderStatus", `Erro ao salvar: ${error.message}`);
+
+  await supabaseClient.from("purchase_order_items").delete().eq("purchase_order_id", order.id);
+  const items = orderDraft.items.map((item) => ({
+    purchase_order_id: order.id,
+    barcode: item.barcode,
+    description: item.description,
+    quantity: item.quantity
+  }));
+  const { error: itemError } = await supabaseClient.from("purchase_order_items").insert(items);
+  if (itemError) return showMessage("#saveOrderStatus", `Erro nos itens: ${itemError.message}`);
 
   localStorage.removeItem(keys.orderDraft);
   orderDraft = blankOrder();
   syncOrderFields();
   resetOrderItemForm();
+  await loadOrders();
   renderAll();
   showMessage("#saveOrderStatus", "Pedido salvo.");
 }
@@ -335,11 +469,41 @@ function openOrder(order) {
   showView("orders");
 }
 
-function deleteOrder(order) {
+async function deleteOrder(order) {
   if (!confirm(`Excluir definitivamente o pedido ${order.number}?`)) return;
-  orders = orders.filter((entry) => entry.id !== order.id);
-  writeJson(keys.orders, orders);
+  const { error } = await supabaseClient.from("purchase_orders").delete().eq("id", order.id);
+  if (error) return alert(`Não foi possível excluir: ${error.message}`);
+  await loadOrders();
   renderAll();
+}
+
+async function mapConferenceItemToDb(item, conferenceId) {
+  const uploaded = await uploadPhoto(item.photo, conferenceId, item.id);
+  return {
+    conference_id: conferenceId,
+    barcode: item.barcode,
+    description: item.description,
+    quantity: item.quantity,
+    photo_path: uploaded.path,
+    photo_url: uploaded.url || item.photo
+  };
+}
+
+async function uploadPhoto(dataUrl, conferenceId, itemId) {
+  if (!dataUrl?.startsWith("data:image")) return { path: "", url: "" };
+  try {
+    const blob = dataUrlToBlob(dataUrl);
+    const path = `${currentUser.id}/${conferenceId}/${itemId || makeId()}.jpg`;
+    const { error } = await supabaseClient.storage.from("mercadoria-fotos").upload(path, blob, {
+      contentType: "image/jpeg",
+      upsert: true
+    });
+    if (error) throw error;
+    const { data } = supabaseClient.storage.from("mercadoria-fotos").getPublicUrl(path);
+    return { path, url: data.publicUrl };
+  } catch (error) {
+    return { path: "", url: dataUrl };
+  }
 }
 
 async function exportExcel(conference) {
@@ -363,6 +527,8 @@ async function exportExcel(conference) {
         const imageId = workbook.addImage({ base64: item.photo, extension: item.photo.includes("image/png") ? "png" : "jpeg" });
         sheet.addImage(imageId, { tl: { col: 4.08, row: row.number - 0.92 }, ext: { width: 120, height: 88 } });
       } catch (error) { row.getCell(5).value = "Foto não incorporada"; }
+    } else if (item.photo) {
+      row.getCell(5).value = item.photo;
     }
   });
   sheet.eachRow((row) => row.eachCell((cell) => { cell.alignment = { vertical: "middle", wrapText: true }; }));
@@ -579,13 +745,15 @@ function fillSelect(selector, records, labeler) {
 
 function syncDraftFields() {
   $("#invoiceNumber").value = draft.invoice || "";
-  $("#inspectorName").value = draft.inspector || "";
+  $("#inspectorName").value = draft.inspector || currentUser?.email?.split("@")[0] || "";
+  if (!draft.inspector) saveDraftHeader();
   updateDraftTitle();
 }
 
 function syncOrderFields() {
   $("#orderNumber").value = orderDraft.number || "";
-  $("#buyerName").value = orderDraft.buyer || "";
+  $("#buyerName").value = orderDraft.buyer || currentUser?.email?.split("@")[0] || "";
+  if (!orderDraft.buyer) saveOrderHeader();
   updateOrderTitle();
 }
 
@@ -692,13 +860,59 @@ function resizeImage(file) {
   });
 }
 
+function mapConferenceFromDb(row) {
+  return {
+    id: row.id,
+    invoice: row.invoice_number,
+    inspector: row.inspector_name,
+    savedAt: row.created_at,
+    updatedAt: row.updated_at,
+    items: (row.conference_items || []).map((item) => ({
+      id: item.id,
+      barcode: item.barcode,
+      description: item.description,
+      quantity: Number(item.quantity),
+      photo: item.photo_url || "",
+      createdAt: item.created_at,
+      updatedAt: item.created_at
+    }))
+  };
+}
+
+function mapOrderFromDb(row) {
+  return {
+    id: row.id,
+    number: row.order_number,
+    buyer: row.buyer_name,
+    savedAt: row.created_at,
+    updatedAt: row.updated_at,
+    items: (row.purchase_order_items || []).map((item) => ({
+      id: item.id,
+      barcode: item.barcode,
+      description: item.description,
+      quantity: Number(item.quantity),
+      createdAt: item.created_at,
+      updatedAt: item.created_at
+    }))
+  };
+}
+
+function dataUrlToBlob(dataUrl) {
+  const [header, data] = dataUrl.split(",");
+  const mime = header.match(/:(.*?);/)?.[1] || "image/jpeg";
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
 function persistDraft() { return writeJson(keys.draft, draft, "#formStatus"); }
 function persistOrderDraft() { return writeJson(keys.orderDraft, orderDraft, "#orderStatus"); }
 function sumUnits(items) { return items.reduce((sum, item) => sum + Number(item.quantity || 0), 0); }
 function makeId() { return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function formatDate(value) { return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)); }
 function safeName(value) { return String(value).replace(/[\\/:*?"<>|]+/g, "-").trim() || "arquivo"; }
-function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char])); }
+function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char])); }
 function readJson(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch (error) { return fallback; } }
 function writeJson(key, value, statusSelector) {
   try { localStorage.setItem(key, JSON.stringify(value)); return true; }
