@@ -61,6 +61,8 @@ function bindEvents() {
 
   $("#runCompare").addEventListener("click", runComparison);
   $("#exportComparePdf").addEventListener("click", exportComparisonPdf);
+  $("#generateUserSql").addEventListener("click", generateConferenteSql);
+  $("#copyUserSql").addEventListener("click", copyConferenteSql);
 }
 
 async function boot() {
@@ -133,10 +135,16 @@ async function loadRemoteData() {
 }
 
 async function loadConferences() {
-  const { data, error } = await supabaseClient
+  let query = supabaseClient
     .from("conferences")
     .select("*, conference_items(*)")
     .order("created_at", { ascending: false });
+
+  if (currentProfile?.role === "conferente") {
+    query = query.eq("created_by", currentUser.id);
+  }
+
+  const { data, error } = await query;
   if (error) {
     conferences = [];
     return;
@@ -169,7 +177,7 @@ function syncSession() {
   const allowed = {
     conferente: ["new", "history"],
     compras: ["orders"],
-    admin: ["new", "history", "orders", "compare"]
+    admin: ["new", "history", "orders", "compare", "users"]
   }[role] || ["new", "history"];
 
   $$(".tab-button").forEach((button) => { button.hidden = !allowed.includes(button.dataset.view); });
@@ -191,6 +199,30 @@ function showView(name) {
   if (name === "orders") renderOrders();
   if (name === "compare") renderCompareOptions();
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function generateConferenteSql() {
+  const username = safeLoginName($("#newUserName").value);
+  const fullName = $("#newUserFullName").value.trim();
+  const password = $("#newUserPassword").value.trim();
+  if (!username) return showMessage("#userStatus", "Informe o usuário do conferente.", $("#newUserName"));
+  if (!password) return showMessage("#userStatus", "Informe a senha inicial.", $("#newUserPassword"));
+
+  const email = `${username}@${defaultLoginDomain}`;
+  const sql = `-- 1) Primeiro crie este usuário em Authentication > Users:\n-- Email: ${email}\n-- Senha: ${password}\n\n-- 2) Depois rode este SQL para liberar como conferente:\ninsert into public.profiles (id, email, role)\nselect id, email, 'conferente'\nfrom auth.users\nwhere email = '${escapeSql(email)}'\non conflict (id) do update set\n  email = excluded.email,\n  role = 'conferente';\n\n-- Nome para sua referência: ${escapeSql(fullName || username)}`;
+  $("#userSqlOutput").textContent = sql;
+  showMessage("#userStatus", `Cadastro preparado para ${email}.`);
+}
+
+async function copyConferenteSql() {
+  const text = $("#userSqlOutput").textContent || "";
+  if (!text || text.includes("Preencha os dados")) return showMessage("#userStatus", "Gere o cadastro primeiro.");
+  try {
+    await navigator.clipboard.writeText(text);
+    showMessage("#userStatus", "SQL copiado.");
+  } catch {
+    showMessage("#userStatus", "Não consegui copiar automaticamente. Selecione o texto e copie manualmente.");
+  }
 }
 
 function saveDraftHeader() {
@@ -913,6 +945,15 @@ function sumUnits(items) { return items.reduce((sum, item) => sum + Number(item.
 function makeId() { return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function formatDate(value) { return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)); }
 function safeName(value) { return String(value).replace(/[\\/:*?"<>|]+/g, "-").trim() || "arquivo"; }
+function safeLoginName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9._-]+/gi, "")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .toLowerCase();
+}
+function escapeSql(value) { return String(value ?? "").replace(/'/g, "''"); }
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char])); }
 function readJson(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch (error) { return fallback; } }
 function writeJson(key, value, statusSelector) {

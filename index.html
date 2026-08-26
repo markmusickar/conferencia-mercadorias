@@ -54,6 +54,7 @@
         <button type="button" class="tab-button" data-view="history">Conferências</button>
         <button type="button" class="tab-button" data-view="orders">Pedidos de compra</button>
         <button type="button" class="tab-button" data-view="compare">Comparar</button>
+        <button type="button" class="tab-button" data-view="users">Usuários</button>
       </nav>
 
       <section id="newView" class="view active">
@@ -229,6 +230,45 @@
             <p>O sistema mostra falta, sobra e quantidade divergente.</p>
           </div>
           <div id="compareResult" class="compare-result"></div>
+        </section>
+      </section>
+
+      <section id="usersView" class="view">
+        <section class="panel history-panel">
+          <div class="section-heading history-heading">
+            <div>
+              <p class="eyebrow">Administração</p>
+              <h2>Cadastrar conferente</h2>
+              <p class="help-text">Use esta tela para padronizar o cadastro. Primeiro crie o login no Supabase Auth, depois rode o SQL gerado para liberar o perfil de conferente.</p>
+            </div>
+          </div>
+          <div class="compare-grid">
+            <label>Usuário do conferente
+              <input id="newUserName" autocomplete="off" placeholder="Ex.: joao">
+            </label>
+            <label>Nome do conferente
+              <input id="newUserFullName" autocomplete="name" placeholder="Ex.: João Silva">
+            </label>
+          </div>
+          <label>Senha inicial
+            <input id="newUserPassword" type="text" inputmode="numeric" placeholder="Ex.: 123456">
+          </label>
+          <div class="notice">
+            O e-mail de login será montado como <strong>usuario@lojaosuper20cupira.com.br</strong>. A senha é usada no Supabase, mas não fica salva nesta tela.
+          </div>
+          <div class="button-row">
+            <button type="button" id="generateUserSql" class="primary-action">Gerar cadastro</button>
+            <button type="button" id="copyUserSql" class="tool-button">Copiar SQL</button>
+          </div>
+          <p id="userStatus" class="form-status" role="status"></p>
+          <div class="sql-box">
+            <p class="eyebrow">Passo a passo</p>
+            <ol>
+              <li>No Supabase, vá em <strong>Authentication &gt; Users</strong> e crie o usuário com o e-mail e senha abaixo.</li>
+              <li>Depois vá em <strong>SQL Editor</strong>, cole o SQL gerado e clique em <strong>Run</strong>.</li>
+            </ol>
+            <pre id="userSqlOutput">Preencha os dados e clique em Gerar cadastro.</pre>
+          </div>
         </section>
       </section>
     </main>
