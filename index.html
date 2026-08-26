@@ -166,6 +166,21 @@
             <label>Responsável por compras<input id="buyerName" placeholder="Ex.: Ana Compras" required></label>
             <div class="divider"></div>
             <p class="eyebrow">Item do pedido</p>
+
+            <div class="scanner-area">
+              <div id="orderScannerFallback" class="scanner-fallback">
+                <span class="scan-mark" aria-hidden="true"></span>
+                <div><strong>Leitor de código</strong><p>Use a câmera ou digite o código do pedido.</p></div>
+              </div>
+              <div id="orderBarcodeReader" class="reader-mount" aria-hidden="true"></div>
+            </div>
+            <div class="button-row">
+              <button type="button" id="startOrderScan" class="tool-button">Ler código</button>
+              <button type="button" id="stopOrderScan" class="tool-button muted" disabled>Parar</button>
+            </div>
+            <input id="orderBarcodePhoto" class="sr-only-file" type="file" accept="image/*" capture="environment">
+            <p id="orderScanStatus" class="scan-status" role="status">Toque em Ler código para usar a câmera.</p>
+
             <label>Código de barras<input id="orderBarcode" inputmode="numeric" placeholder="7890000000000" required></label>
             <label>Descrição<input id="orderDescription" placeholder="Ex.: Caixa de parafusos 10 mm" required></label>
             <label>Quantidade pedida<input id="orderQuantity" type="number" inputmode="numeric" pattern="[0-9]*" min="1" step="1" placeholder="Digite a quantidade" required></label>

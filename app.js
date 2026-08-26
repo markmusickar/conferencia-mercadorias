@@ -23,6 +23,7 @@ let editingItemId = null;
 let editingOrderItemId = null;
 let currentPhoto = "";
 let scanner = null;
+let scannerMode = "conference";
 let messageTimer = null;
 let lastComparison = null;
 
@@ -48,6 +49,9 @@ function bindEvents() {
   $("#startScan").addEventListener("click", startScanner);
   $("#stopScan").addEventListener("click", stopScanner);
   $("#barcodePhoto").addEventListener("change", scanCapturedPhoto);
+  $("#startOrderScan").addEventListener("click", startOrderScanner);
+  $("#stopOrderScan").addEventListener("click", stopScanner);
+  $("#orderBarcodePhoto").addEventListener("change", scanCapturedPhoto);
 
   $("#newOrder").addEventListener("click", startNewOrder);
   $("#orderForm").addEventListener("submit", addOrUpdateOrderItem);
@@ -844,13 +848,23 @@ function renderPhotoPreview() {
 }
 
 async function startScanner() {
+  scannerMode = "conference";
+  return startScannerFor(getScannerConfig());
+}
+
+async function startOrderScanner() {
+  scannerMode = "order";
+  return startScannerFor(getScannerConfig());
+}
+
+async function startScannerFor(config) {
   if (!window.isSecureContext || !window.Html5Qrcode) return openPhotoScanner();
   try {
-    scanner = new Html5Qrcode("barcodeReader");
-    $("#barcodeReader").classList.add("active");
-    $("#scannerFallback").hidden = true;
-    $("#startScan").disabled = true;
-    $("#stopScan").disabled = false;
+    scanner = new Html5Qrcode(config.readerId);
+    $(config.readerSelector).classList.add("active");
+    $(config.fallbackSelector).hidden = true;
+    $(config.startSelector).disabled = true;
+    $(config.stopSelector).disabled = false;
     setScanStatus("Aponte a câmera para o código.");
     await scanner.start({ facingMode: "environment" }, { fps: 8, qrbox: { width: 280, height: 150 } }, handleBarcode);
   } catch (error) {
@@ -865,22 +879,33 @@ async function stopScanner() {
     try { await scanner.clear(); } catch (error) { /* área já limpa */ }
     scanner = null;
   }
-  $("#barcodeReader").classList.remove("active");
-  $("#scannerFallback").hidden = false;
-  $("#startScan").disabled = false;
-  $("#stopScan").disabled = true;
+  $$(".reader-mount").forEach((reader) => reader.classList.remove("active"));
+  ["#scannerFallback", "#orderScannerFallback"].forEach((selector) => {
+    const fallback = $(selector);
+    if (fallback) fallback.hidden = false;
+  });
+  ["#startScan", "#startOrderScan"].forEach((selector) => {
+    const button = $(selector);
+    if (button) button.disabled = false;
+  });
+  ["#stopScan", "#stopOrderScan"].forEach((selector) => {
+    const button = $(selector);
+    if (button) button.disabled = true;
+  });
 }
 
 function openPhotoScanner() {
+  const config = getScannerConfig();
   setScanStatus("Fotografe o código de barras de perto.");
-  $("#barcodePhoto").value = "";
-  $("#barcodePhoto").click();
+  $(config.photoSelector).value = "";
+  $(config.photoSelector).click();
 }
 
 async function scanCapturedPhoto() {
-  const file = $("#barcodePhoto").files?.[0];
+  const config = getScannerConfig();
+  const file = $(config.photoSelector).files?.[0];
   if (!file || !window.Html5Qrcode) return;
-  const fileScanner = new Html5Qrcode("barcodeReader");
+  const fileScanner = new Html5Qrcode(config.readerId);
   try {
     setScanStatus("Lendo código...");
     handleBarcode(await fileScanner.scanFile(file, false));
@@ -892,12 +917,39 @@ async function scanCapturedPhoto() {
 }
 
 function handleBarcode(value) {
+  const config = getScannerConfig();
   const code = String(value || "").trim();
   if (!code) return;
-  $("#barcode").value = code;
+  $(config.inputSelector).value = code;
   stopScanner();
   setScanStatus(`Código lido: ${code}`);
-  $("#description").focus();
+  $(config.nextSelector).focus();
+}
+
+function getScannerConfig() {
+  return scannerMode === "order"
+    ? {
+      readerId: "orderBarcodeReader",
+      readerSelector: "#orderBarcodeReader",
+      fallbackSelector: "#orderScannerFallback",
+      startSelector: "#startOrderScan",
+      stopSelector: "#stopOrderScan",
+      photoSelector: "#orderBarcodePhoto",
+      statusSelector: "#orderScanStatus",
+      inputSelector: "#orderBarcode",
+      nextSelector: "#orderDescription"
+    }
+    : {
+      readerId: "barcodeReader",
+      readerSelector: "#barcodeReader",
+      fallbackSelector: "#scannerFallback",
+      startSelector: "#startScan",
+      stopSelector: "#stopScan",
+      photoSelector: "#barcodePhoto",
+      statusSelector: "#scanStatus",
+      inputSelector: "#barcode",
+      nextSelector: "#description"
+    };
 }
 
 function resizeImage(file) {
@@ -1005,7 +1057,10 @@ function showMessage(selector, text, focusTarget) {
   messageTimer = setTimeout(() => { element.textContent = ""; }, 5000);
   return false;
 }
-function setScanStatus(text) { $("#scanStatus").textContent = text; }
+function setScanStatus(text) {
+  const config = getScannerConfig();
+  $(config.statusSelector).textContent = text;
+}
 function styleHeader(row) {
   row.font = { bold: true, color: { argb: "FFFFFFFF" } };
   row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F766E" } };
