@@ -765,7 +765,7 @@ function resetItemForm() {
   editingItemId = null;
   currentPhoto = "";
   $("#itemForm").reset();
-  $("#quantity").value = 1;
+  $("#quantity").value = "";
   $("#itemForm .primary-action").textContent = "Adicionar item";
   renderPhotoPreview();
 }
@@ -774,7 +774,7 @@ function resetOrderItemForm() {
   editingOrderItemId = null;
   $("#orderBarcode").value = "";
   $("#orderDescription").value = "";
-  $("#orderQuantity").value = 1;
+  $("#orderQuantity").value = "";
   $("#orderForm .primary-action").textContent = "Adicionar item";
 }
 

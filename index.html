@@ -105,7 +105,7 @@
             <label>Código de barras<input id="barcode" inputmode="numeric" placeholder="7890000000000" required></label>
             <label>Descrição<input id="description" placeholder="Ex.: Caixa de parafusos 10 mm" required></label>
             <div class="field-grid">
-              <label>Quantidade<input id="quantity" type="number" min="1" step="1" value="1" required></label>
+              <label>Quantidade<input id="quantity" type="number" inputmode="numeric" pattern="[0-9]*" min="1" step="1" placeholder="Digite a quantidade" required></label>
               <label>Foto da mercadoria<input id="photo" type="file" accept="image/*" capture="environment"></label>
             </div>
             <div class="photo-preview" id="photoPreview"><span>Sem foto</span></div>
@@ -167,7 +167,7 @@
             <p class="eyebrow">Item do pedido</p>
             <label>Código de barras<input id="orderBarcode" inputmode="numeric" placeholder="7890000000000" required></label>
             <label>Descrição<input id="orderDescription" placeholder="Ex.: Caixa de parafusos 10 mm" required></label>
-            <label>Quantidade pedida<input id="orderQuantity" type="number" min="1" step="1" value="1" required></label>
+            <label>Quantidade pedida<input id="orderQuantity" type="number" inputmode="numeric" pattern="[0-9]*" min="1" step="1" placeholder="Digite a quantidade" required></label>
             <div class="action-row">
               <button type="submit" class="primary-action">Adicionar item</button>
               <button type="button" id="clearOrderItem" class="secondary-action">Limpar item</button>
