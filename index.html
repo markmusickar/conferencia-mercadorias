@@ -257,7 +257,8 @@
             O e-mail de login será montado como <strong>usuario@lojaosuper20cupira.com.br</strong>. A senha é usada no Supabase, mas não fica salva nesta tela.
           </div>
           <div class="button-row">
-            <button type="button" id="generateUserSql" class="primary-action">Gerar cadastro</button>
+            <button type="button" id="createConferente" class="primary-action">Cadastrar conferente</button>
+            <button type="button" id="generateUserSql" class="tool-button">Gerar SQL manual</button>
             <button type="button" id="copyUserSql" class="tool-button">Copiar SQL</button>
           </div>
           <p id="userStatus" class="form-status" role="status"></p>
@@ -267,7 +268,7 @@
               <li>No Supabase, vá em <strong>Authentication &gt; Users</strong> e crie o usuário com o e-mail e senha abaixo.</li>
               <li>Depois vá em <strong>SQL Editor</strong>, cole o SQL gerado e clique em <strong>Run</strong>.</li>
             </ol>
-            <pre id="userSqlOutput">Preencha os dados e clique em Gerar cadastro.</pre>
+            <pre id="userSqlOutput">Preencha os dados e clique em Cadastrar conferente. Se a função ainda não estiver ativa, gere o SQL manual.</pre>
           </div>
         </section>
       </section>

@@ -61,6 +61,7 @@ function bindEvents() {
 
   $("#runCompare").addEventListener("click", runComparison);
   $("#exportComparePdf").addEventListener("click", exportComparisonPdf);
+  $("#createConferente").addEventListener("click", createConferente);
   $("#generateUserSql").addEventListener("click", generateConferenteSql);
   $("#copyUserSql").addEventListener("click", copyConferenteSql);
 }
@@ -212,6 +213,34 @@ function generateConferenteSql() {
   const sql = `-- 1) Primeiro crie este usuário em Authentication > Users:\n-- Email: ${email}\n-- Senha: ${password}\n\n-- 2) Depois rode este SQL para liberar como conferente:\ninsert into public.profiles (id, email, role)\nselect id, email, 'conferente'\nfrom auth.users\nwhere email = '${escapeSql(email)}'\non conflict (id) do update set\n  email = excluded.email,\n  role = 'conferente';\n\n-- Nome para sua referência: ${escapeSql(fullName || username)}`;
   $("#userSqlOutput").textContent = sql;
   showMessage("#userStatus", `Cadastro preparado para ${email}.`);
+}
+
+async function createConferente() {
+  const username = safeLoginName($("#newUserName").value);
+  const fullName = $("#newUserFullName").value.trim();
+  const password = $("#newUserPassword").value.trim();
+  if (!username) return showMessage("#userStatus", "Informe o usuário do conferente.", $("#newUserName"));
+  if (!password || password.length < 6) return showMessage("#userStatus", "Informe uma senha com pelo menos 6 caracteres.", $("#newUserPassword"));
+
+  const email = `${username}@${defaultLoginDomain}`;
+  showMessage("#userStatus", "Criando conferente...");
+  const { data, error } = await supabaseClient.functions.invoke("criar-conferente", {
+    body: { username, full_name: fullName, password }
+  });
+
+  if (error) {
+    generateConferenteSql();
+    return showMessage("#userStatus", "A função ainda não está ativa no Supabase. Use o SQL gerado por enquanto.");
+  }
+
+  if (!data?.ok) {
+    generateConferenteSql();
+    return showMessage("#userStatus", data?.error || "Não foi possível criar o conferente.");
+  }
+
+  $("#userSqlOutput").textContent = `Conferente criado com sucesso.\n\nUsuário: ${username}\nE-mail: ${data.email || email}`;
+  $("#newUserPassword").value = "";
+  showMessage("#userStatus", `Conferente ${username} criado.`);
 }
 
 async function copyConferenteSql() {
