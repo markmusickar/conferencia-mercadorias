@@ -88,10 +88,64 @@ async function fillProductDescription(inputSelector, descriptionSelector, status
   return false;
 }
 
+let catalogProducts = [];
+let catalogPage = 0;
+let catalogRequest = 0;
+const catalogPageSize = 50;
+
+async function loadProductCatalog() {
+  if (currentProfile?.role !== "admin") return;
+  const request = ++catalogRequest;
+  const userId = currentUser?.id;
+  catalogProducts = [];
+  catalogPage = 0;
+  renderProductCatalog();
+  $("#productCatalogStatus").textContent = "Carregando produtos...";
+  try {
+    const loaded = [];
+    for (let offset = 0; ; offset += 500) {
+      const { data, error } = await supabaseClient.from("products")
+        .select("barcode, description, updated_at").order("barcode").range(offset, offset + 499);
+      if (request !== catalogRequest || currentUser?.id !== userId || currentProfile?.role !== "admin") return;
+      if (error) throw error;
+      loaded.push(...(data || []));
+      if (!data || data.length < 500) break;
+    }
+    catalogProducts = loaded;
+    $("#productCatalogStatus").textContent = "";
+    renderProductCatalog();
+  } catch (_) {
+    if (request !== catalogRequest || currentUser?.id !== userId || currentProfile?.role !== "admin") return;
+    $("#productCatalogStatus").textContent = "Não foi possível carregar os produtos. Toque em Atualizar para tentar novamente.";
+  }
+}
+
+function renderProductCatalog() {
+  if (currentProfile?.role !== "admin") return;
+  const query = $("#productCatalogSearch").value.trim().toLocaleLowerCase("pt-BR");
+  const filtered = catalogProducts.filter(product =>
+    product.barcode.toLocaleLowerCase("pt-BR").includes(query) ||
+    product.description.toLocaleLowerCase("pt-BR").includes(query));
+  const pages = Math.max(1, Math.ceil(filtered.length / catalogPageSize));
+  catalogPage = Math.min(catalogPage, pages - 1);
+  $("#productCatalogCount").textContent = filtered.length + " de " + catalogProducts.length + " produtos";
+  $("#productCatalogRows").innerHTML = filtered.slice(catalogPage * catalogPageSize, (catalogPage + 1) * catalogPageSize)
+    .map(product => "<tr><td>" + escapeHtml(product.barcode) + "</td><td>" + escapeHtml(product.description) +
+      "</td><td>" + escapeHtml(product.updated_at ? formatDate(product.updated_at) : "-") + "</td></tr>").join("");
+  $("#productCatalogEmpty").hidden = filtered.length > 0;
+  $("#productCatalogPrevious").disabled = catalogPage === 0;
+  $("#productCatalogNext").disabled = catalogPage >= pages - 1;
+  $("#productCatalogPage").textContent = "Página " + (catalogPage + 1) + " de " + pages;
+}
+
 bindEvents();
 boot();
 
 function bindEvents() {
+  $("#productCatalogSearch").addEventListener("input", () => { catalogPage = 0; renderProductCatalog(); });
+  $("#refreshProductCatalog").addEventListener("click", loadProductCatalog);
+  $("#productCatalogPrevious").addEventListener("click", () => { catalogPage = Math.max(0, catalogPage - 1); renderProductCatalog(); });
+  $("#productCatalogNext").addEventListener("click", () => { catalogPage += 1; renderProductCatalog(); });
   bindProductLookup("#barcode", "#description", "#formStatus");
   bindProductLookup("#orderBarcode", "#orderDescription", "#orderStatus");
   $("#loginForm").addEventListener("submit", login);
@@ -162,6 +216,10 @@ async function login(event) {
 }
 
 async function logout() {
+  catalogRequest += 1;
+  catalogProducts = [];
+  $("#productCatalogRows").innerHTML = "";
+  $("#productCatalogSearch").value = "";
   await supabaseClient.auth.signOut();
   currentUser = null;
   currentProfile = null;
@@ -250,7 +308,7 @@ function syncSession() {
   const allowed = {
     conferente: ["new", "history"],
     compras: ["orders"],
-    admin: ["new", "history", "orders", "compare", "users"]
+    admin: ["new", "history", "orders", "compare", "products", "users"]
   }[role] || ["new", "history"];
 
   $$(".tab-button").forEach((button) => { button.hidden = !allowed.includes(button.dataset.view); });
@@ -263,11 +321,13 @@ function canSeeOrders() {
 }
 
 function showView(name) {
+  if (name === "products" && currentProfile?.role !== "admin") return;
   const targetButton = $(`.tab-button[data-view="${name}"]`);
   if (targetButton?.hidden) return;
   $$(".tab-button").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
   $$(".view").forEach((view) => view.classList.remove("active"));
   $(`#${name}View`)?.classList.add("active");
+  if (name === "products") loadProductCatalog();
   if (name === "history") renderHistory();
   if (name === "orders") renderOrders();
   if (name === "compare") renderCompareOptions();

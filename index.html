@@ -54,6 +54,7 @@
         <button type="button" class="tab-button" data-view="history">Conferências</button>
         <button type="button" class="tab-button" data-view="orders">Pedidos de compra</button>
         <button type="button" class="tab-button" data-view="compare">Comparar</button>
+        <button type="button" class="tab-button" data-view="products" hidden>Produtos cadastrados</button>
         <button type="button" class="tab-button" data-view="users">Usuários</button>
       </nav>
 
@@ -248,6 +249,35 @@
         </section>
       </section>
 
+      <section id="productsView" class="view">
+        <section class="panel history-panel">
+          <div class="section-heading history-heading">
+            <div><p class="eyebrow">Cadastro de produtos</p><h2>Produtos cadastrados</h2></div>
+            <button type="button" id="refreshProductCatalog" class="secondary-action small">Atualizar</button>
+          </div>
+          <p class="help-text">Produtos guardados ao salvar as conferências. As descrições são preenchidas ao ler o código de barras.</p>
+          <div class="search-row">
+            <label for="productCatalogSearch">Pesquisar produto</label>
+            <input id="productCatalogSearch" type="search" placeholder="Código de barras ou descrição">
+          </div>
+          <p id="productCatalogCount" class="help-text"></p>
+          <p id="productCatalogStatus" class="form-status" role="status"></p>
+          <div class="table-wrap">
+            <table class="compare-table">
+              <caption class="help-text">Código, descrição e última atualização dos produtos</caption>
+              <thead><tr><th scope="col">Código de barras</th><th scope="col">Descrição</th><th scope="col">Atualizado em</th></tr></thead>
+              <tbody id="productCatalogRows"></tbody>
+            </table>
+          </div>
+          <p id="productCatalogEmpty" class="help-text" hidden>Nenhum produto encontrado.</p>
+          <div class="button-row" style="margin-top:14px">
+            <button type="button" id="productCatalogPrevious" class="secondary-action small" disabled>Anterior</button>
+            <span id="productCatalogPage" aria-live="polite">Página 1 de 1</span>
+            <button type="button" id="productCatalogNext" class="secondary-action small" disabled>Próxima</button>
+          </div>
+        </section>
+      </section>
+
       <section id="usersView" class="view">
         <section class="panel history-panel">
           <div class="section-heading history-heading">
@@ -323,6 +353,6 @@
     <script src="https://unpkg.com/html5-qrcode" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js" crossorigin="anonymous"></script>
-    <script src="app.js?v=20261024-produtos"></script>
+    <script src="app.js?v=20261024-painel-produtos"></script>
   </body>
 </html>
