@@ -111,13 +111,34 @@ async function loadProductCatalog() {
       loaded.push(...(data || []));
       if (!data || data.length < 500) break;
     }
-    catalogProducts = loaded;
-    $("#productCatalogStatus").textContent = "";
+    const photos = new Map();
+    let photoWarning = false;
+    try {
+      for (let offset = 0; ; offset += 500) {
+        const { data, error } = await supabaseClient.from("conference_items")
+          .select("barcode, photo_url, created_at, id").neq("photo_url", "")
+          .order("created_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + 499);
+        if (request !== catalogRequest || currentUser?.id !== userId || currentProfile?.role !== "admin") return;
+        if (error) throw error;
+        for (const item of data || []) {
+          const code = item.barcode.trim();
+          if (!photos.has(code) && validProductPhoto(item.photo_url)) photos.set(code, item.photo_url);
+        }
+        if (!data || data.length < 500) break;
+      }
+    } catch (_) { photoWarning = true; }
+    if (request !== catalogRequest || currentUser?.id !== userId || currentProfile?.role !== "admin") return;
+    catalogProducts = loaded.map(product => ({ ...product, photo_url: photos.get(product.barcode) || "" }));
+    $("#productCatalogStatus").textContent = photoWarning ? "Os produtos foram carregados, mas algumas fotos podem estar indisponíveis. Toque em Atualizar para tentar novamente." : "";
     renderProductCatalog();
   } catch (_) {
     if (request !== catalogRequest || currentUser?.id !== userId || currentProfile?.role !== "admin") return;
     $("#productCatalogStatus").textContent = "Não foi possível carregar os produtos. Toque em Atualizar para tentar novamente.";
   }
+}
+
+function validProductPhoto(url) {
+  return typeof url === "string" && /^(https?:\/\/|data:image\/(?:png|jpeg|webp|gif);base64,)/i.test(url);
 }
 
 function renderProductCatalog() {
@@ -130,7 +151,9 @@ function renderProductCatalog() {
   catalogPage = Math.min(catalogPage, pages - 1);
   $("#productCatalogCount").textContent = filtered.length + " de " + catalogProducts.length + " produtos";
   $("#productCatalogRows").innerHTML = filtered.slice(catalogPage * catalogPageSize, (catalogPage + 1) * catalogPageSize)
-    .map(product => "<tr><td>" + escapeHtml(product.barcode) + "</td><td>" + escapeHtml(product.description) +
+    .map(product => "<tr><td><div class=\"thumb\">" + (validProductPhoto(product.photo_url)
+      ? "<img loading=\"lazy\" src=\"" + escapeHtml(product.photo_url) + "\" alt=\"Foto de " + escapeHtml(product.description) + "\">"
+      : "<span>Sem foto</span>") + "</div></td><td>" + escapeHtml(product.barcode) + "</td><td>" + escapeHtml(product.description) +
       "</td><td>" + escapeHtml(product.updated_at ? formatDate(product.updated_at) : "-") + "</td></tr>").join("");
   $("#productCatalogEmpty").hidden = filtered.length > 0;
   $("#productCatalogPrevious").disabled = catalogPage === 0;
@@ -142,6 +165,12 @@ bindEvents();
 boot();
 
 function bindEvents() {
+  $("#productCatalogRows").addEventListener("error", event => {
+    if (event.target.tagName !== "IMG") return;
+    const fallback = document.createElement("span");
+    fallback.textContent = "Foto indisponível";
+    event.target.replaceWith(fallback);
+  }, true);
   $("#productCatalogSearch").addEventListener("input", () => { catalogPage = 0; renderProductCatalog(); });
   $("#refreshProductCatalog").addEventListener("click", loadProductCatalog);
   $("#productCatalogPrevious").addEventListener("click", () => { catalogPage = Math.max(0, catalogPage - 1); renderProductCatalog(); });
