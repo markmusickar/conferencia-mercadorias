@@ -346,7 +346,7 @@ async function saveConference() {
     created_by: currentUser.id,
     updated_at: now
   };
-  if (!draft.id) payload.created_at = draft.startedAt || now;
+  if (!draft.id) payload.created_at = now;
 
   const query = draft.id
     ? supabaseClient.from("conferences").update(payload).eq("id", draft.id).select().single()
@@ -476,7 +476,7 @@ async function saveOrder() {
     created_by: currentUser.id,
     updated_at: now
   };
-  if (!orderDraft.id) payload.created_at = orderDraft.startedAt || now;
+  if (!orderDraft.id) payload.created_at = now;
 
   const query = orderDraft.id
     ? supabaseClient.from("purchase_orders").update(payload).eq("id", orderDraft.id).select().single()
@@ -979,7 +979,7 @@ function mapConferenceFromDb(row) {
     id: row.id,
     invoice: row.invoice_number,
     inspector: row.inspector_name,
-    savedAt: row.created_at,
+    savedAt: row.updated_at || row.created_at,
     updatedAt: row.updated_at,
     items: (row.conference_items || []).map((item) => ({
       id: item.id,
@@ -998,7 +998,7 @@ function mapOrderFromDb(row) {
     id: row.id,
     number: row.order_number,
     buyer: row.buyer_name,
-    savedAt: row.created_at,
+    savedAt: row.updated_at || row.created_at,
     updatedAt: row.updated_at,
     items: (row.purchase_order_items || []).map((item) => ({
       id: item.id,
