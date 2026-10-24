@@ -26,11 +26,74 @@ let scanner = null;
 let scannerMode = "conference";
 let messageTimer = null;
 let lastComparison = null;
+const productLookups = new Map();
+
+function bindProductLookup(inputSelector, descriptionSelector, statusSelector) {
+  let timer;
+  $(inputSelector).addEventListener("keydown", async event => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    clearTimeout(timer);
+    $(descriptionSelector).focus();
+    const found = await fillProductDescription(inputSelector, descriptionSelector, statusSelector);
+    if (found && document.activeElement === $(descriptionSelector)) {
+      $(inputSelector === "#orderBarcode" ? "#orderQuantity" : "#quantity").focus();
+    }
+  });
+  $(inputSelector).addEventListener("input", () => {
+    clearTimeout(timer);
+    const description = $(descriptionSelector);
+    if (description.dataset.productDescription === description.value) description.value = "";
+    delete description.dataset.productDescription;
+    productLookups.set(inputSelector, {});
+    timer = setTimeout(() => fillProductDescription(inputSelector, descriptionSelector, statusSelector), 300);
+  });
+  $(inputSelector).addEventListener("change", () => {
+    clearTimeout(timer);
+    fillProductDescription(inputSelector, descriptionSelector, statusSelector);
+  });
+}
+
+async function fillProductDescription(inputSelector, descriptionSelector, statusSelector) {
+  const code = $(inputSelector).value.trim();
+  const descriptionInput = $(descriptionSelector);
+  const originalDescription = descriptionInput.value;
+  const request = {};
+  productLookups.set(inputSelector, request);
+  if (!code || !currentUser) return false;
+  const lookupUserId = currentUser.id;
+  let product;
+  try {
+    const { data, error } = await supabaseClient.from("products").select("description").eq("barcode", code).maybeSingle();
+    if (!error) product = data;
+  } catch (_) { /* Histórico disponível continua sendo uma alternativa. */ }
+  if (currentUser?.id !== lookupUserId || productLookups.get(inputSelector) !== request || $(inputSelector).value.trim() !== code || descriptionInput.value !== originalDescription) return false;
+  if (!product) {
+    const matches = [...draft.items, ...conferences.flatMap(record => record.items)]
+      .filter(item => item.barcode.trim() === code && item.description.trim());
+    const descriptions = new Set(matches.map(item => item.description.trim().toLocaleLowerCase("pt-BR")));
+    if (descriptions.size === 1) product = matches[0];
+    if (descriptions.size > 1) {
+      showMessage(statusSelector, "Este código tem descrições diferentes no histórico. Confirme a descrição.");
+      return false;
+    }
+  }
+  if (product && !originalDescription.trim()) {
+    descriptionInput.value = product.description;
+    descriptionInput.dataset.productDescription = product.description;
+    showMessage(statusSelector, "Produto encontrado. Confira a descrição e informe a quantidade.");
+    return true;
+  }
+  if (!product) showMessage(statusSelector, "Produto não cadastrado. Informe a descrição; ela será guardada ao salvar a conferência.");
+  return false;
+}
 
 bindEvents();
 boot();
 
 function bindEvents() {
+  bindProductLookup("#barcode", "#description", "#formStatus");
+  bindProductLookup("#orderBarcode", "#orderDescription", "#orderStatus");
   $("#loginForm").addEventListener("submit", login);
   $("#logoutButton").addEventListener("click", logout);
   $$(".tab-button").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
@@ -89,7 +152,12 @@ async function login(event) {
   const password = $("#loginPassword").value;
   showMessage("#loginStatus", "Entrando...");
   const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-  if (error) return showMessage("#loginStatus", "Usuário ou senha inválidos.");
+  if (error) {
+    const invalidCredentials = error.code === "invalid_credentials" || error.message === "Invalid login credentials";
+    return showMessage("#loginStatus", invalidCredentials
+      ? "Usuário ou senha inválidos."
+      : "Não foi possível acessar o serviço de login. Verifique a conexão e se o projeto Supabase está ativo.");
+  }
   await enterApp(data.user);
 }
 
@@ -827,6 +895,8 @@ function updateDraftTitle() { $("#draftTitle").textContent = draft.id ? `Editand
 function updateOrderTitle() { $("#orderTitle").textContent = orderDraft.id ? `Editando: ${orderDraft.number}` : "Novo pedido de compra"; }
 
 function resetItemForm() {
+  productLookups.set("#barcode", {});
+  delete $("#description").dataset.productDescription;
   editingItemId = null;
   currentPhoto = "";
   $("#itemForm").reset();
@@ -836,6 +906,8 @@ function resetItemForm() {
 }
 
 function resetOrderItemForm() {
+  productLookups.set("#orderBarcode", {});
+  delete $("#orderDescription").dataset.productDescription;
   editingOrderItemId = null;
   $("#orderBarcode").value = "";
   $("#orderDescription").value = "";
@@ -916,14 +988,21 @@ async function scanCapturedPhoto() {
   }
 }
 
-function handleBarcode(value) {
+async function handleBarcode(value) {
   const config = getScannerConfig();
   const code = String(value || "").trim();
   if (!code) return;
+  const description = $(config.nextSelector);
+  if ($(config.inputSelector).value.trim() !== code && description.dataset.productDescription === description.value) description.value = "";
+  delete description.dataset.productDescription;
   $(config.inputSelector).value = code;
   stopScanner();
   setScanStatus(`Código lido: ${code}`);
   $(config.nextSelector).focus();
+  const found = await fillProductDescription(config.inputSelector, config.nextSelector, config.statusSelector);
+  if (found && document.activeElement === $(config.nextSelector)) {
+    $(scannerMode === "order" ? "#orderQuantity" : "#quantity").focus();
+  }
 }
 
 function getScannerConfig() {
