@@ -581,6 +581,9 @@ function addOrUpdateOrderItem(event) {
   }, "#orderStatus", false);
   if (!item) return;
 
+  const unitPrice = parseUnitPrice($("#orderUnitPrice").value);
+  if (!Number.isFinite(unitPrice)) return showMessage("#orderStatus", "Informe um valor unitário válido, como 12,50, com até duas casas decimais.");
+  item.unitPrice = unitPrice;
   const now = new Date().toISOString();
   delete item.photo;
   if (editingOrderItemId) {
@@ -612,6 +615,7 @@ function handleOrderItemAction(event) {
     $("#orderBarcode").value = item.barcode;
     $("#orderDescription").value = item.description;
     $("#orderQuantity").value = item.quantity;
+    $("#orderUnitPrice").value = item.unitPrice == null ? "" : Number(item.unitPrice).toFixed(2).replace(".", ",");
     $("#orderForm .primary-action").textContent = "Salvar alteração";
     $("#orderBarcode").focus();
   }
@@ -646,7 +650,8 @@ async function saveOrder() {
     purchase_order_id: order.id,
     barcode: item.barcode,
     description: item.description,
-    quantity: item.quantity
+    quantity: item.quantity,
+    unit_price: item.unitPrice ?? null
   }));
   const { error: itemError } = await supabaseClient.from("purchase_order_items").insert(items);
   if (itemError) return showMessage("#saveOrderStatus", `Erro nos itens: ${itemError.message}`);
@@ -763,15 +768,16 @@ async function exportOrderExcel(order) {
   if (!window.ExcelJS) return alert("O recurso de Excel não carregou. Verifique a internet e tente novamente.");
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Pedido de compra");
-  sheet.columns = [{ key: "code", width: 22 }, { key: "description", width: 42 }, { key: "quantity", width: 16 }];
+  sheet.columns = [{ key: "code", width: 22 }, { key: "description", width: 42 }, { key: "quantity", width: 16 }, { key: "unitPrice", width: 20 }];
   sheet.addRow(["PEDIDO DE COMPRA"]);
-  sheet.mergeCells("A1:C1");
+  sheet.mergeCells("A1:D1");
   sheet.getCell("A1").font = { bold: true, size: 16, color: { argb: "FF0F766E" } };
   sheet.addRow(["Pedido", order.number]);
   sheet.addRow(["Compras", order.buyer]);
-  const header = sheet.addRow(["Código", "Descrição", "Quantidade pedida"]);
+  const header = sheet.addRow(["Código", "Descrição", "Quantidade pedida", "Valor unitário (R$)"]);
   styleHeader(header);
-  order.items.forEach((item) => sheet.addRow([item.barcode, item.description, item.quantity]));
+  order.items.forEach((item) => sheet.addRow([item.barcode, item.description, item.quantity, item.unitPrice ?? null]));
+  sheet.getColumn(4).numFmt = '"R$" #,##0.00';
   const buffer = await workbook.xlsx.writeBuffer();
   downloadBlob(buffer, `${safeName(order.number)}-pedido.xlsx`, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 }
@@ -790,8 +796,8 @@ function exportOrderPdf(order) {
   printReport({
     title: "Pedido de compra",
     meta: [["Pedido", order.number], ["Compras", order.buyer], ["Data", formatDate(order.savedAt || order.updatedAt)]],
-    headers: ["Código", "Descrição", "Quantidade pedida"],
-    rows: order.items.map((item) => [item.barcode, `<strong>${escapeHtml(item.description)}</strong>`, item.quantity]),
+    headers: ["Código", "Descrição", "Quantidade pedida", "Valor unitário"],
+    rows: order.items.map((item) => [item.barcode, `<strong>${escapeHtml(item.description)}</strong>`, item.quantity, formatUnitPrice(item.unitPrice)]),
     footer: `${order.items.length} itens · ${sumUnits(order.items)} unidades`
   });
 }
@@ -905,7 +911,7 @@ function renderItemList(selector, items, showPhoto) {
     node.dataset.id = item.id;
     node.querySelector("h3").textContent = item.description;
     node.querySelector(".qty-pill").textContent = `${item.quantity} un.`;
-    node.querySelector(".code-line").textContent = `Código: ${item.barcode}`;
+    node.querySelector(".code-line").textContent = `Código: ${item.barcode}` + (showPhoto ? "" : ` · Valor unitário: ${formatUnitPrice(item.unitPrice)}`);
     if (showPhoto && item.photo) {
       const image = new Image();
       image.src = item.photo;
@@ -1001,6 +1007,7 @@ function resetOrderItemForm() {
   $("#orderBarcode").value = "";
   $("#orderDescription").value = "";
   $("#orderQuantity").value = "";
+  $("#orderUnitPrice").value = "";
   $("#orderForm .primary-action").textContent = "Adicionar item";
 }
 
@@ -1173,6 +1180,7 @@ function mapOrderFromDb(row) {
       barcode: item.barcode,
       description: item.description,
       quantity: Number(item.quantity),
+      unitPrice: item.unit_price == null ? null : Number(item.unit_price),
       createdAt: item.created_at,
       updatedAt: item.created_at
     }))
@@ -1236,4 +1244,15 @@ function styleHeader(row) {
 function normalizeLogin(value) {
   const login = String(value || "").trim().toLowerCase();
   return login.includes("@") ? login : `${login}@${defaultLoginDomain}`;
+}
+
+function parseUnitPrice(raw) {
+  const text = String(raw ?? "").trim();
+  if (!/^\d{1,10}(?:[.,]\d{1,2})?$/.test(text)) return NaN;
+  return Math.round(Number(text.replace(",", ".")) * 100) / 100;
+}
+
+function formatUnitPrice(value) {
+  return value == null || !Number.isFinite(Number(value)) ? "Não informado" :
+    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value));
 }

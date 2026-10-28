@@ -185,6 +185,7 @@
             <label>Código de barras<input id="orderBarcode" inputmode="numeric" placeholder="7890000000000" required></label>
             <label>Descrição<input id="orderDescription" placeholder="Ex.: Caixa de parafusos 10 mm" required></label>
             <label>Quantidade pedida<input id="orderQuantity" type="number" inputmode="numeric" pattern="[0-9]*" min="1" step="1" placeholder="Digite a quantidade" required></label>
+            <label>Valor unitário (R$)<input id="orderUnitPrice" inputmode="decimal" placeholder="Ex.: 12,50" required></label>
             <div class="action-row">
               <button type="submit" class="primary-action">Adicionar item</button>
               <button type="button" id="clearOrderItem" class="secondary-action">Limpar item</button>
@@ -353,6 +354,6 @@
     <script src="https://unpkg.com/html5-qrcode" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js" crossorigin="anonymous"></script>
-    <script src="app.js?v=20261024-fotos-produtos"></script>
+    <script src="app.js?v=20261027-valor-unitario"></script>
   </body>
 </html>
