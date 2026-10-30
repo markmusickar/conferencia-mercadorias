@@ -110,6 +110,7 @@
               <label>Quantidade<input id="quantity" type="number" inputmode="numeric" pattern="[0-9]*" min="1" step="1" placeholder="Digite a quantidade" required></label>
               <label>Foto da mercadoria<input id="photo" type="file" accept="image/*" capture="environment"></label>
             </div>
+            <label>Observação (opcional)<textarea id="itemObservation" rows="3" placeholder="Ex.: embalagem avariada, validade ou detalhe da mercadoria"></textarea></label>
             <div class="photo-preview" id="photoPreview"><span>Sem foto</span></div>
             <div class="action-row">
               <button type="submit" class="primary-action">Adicionar item</button>
@@ -326,6 +327,7 @@
         <div class="item-main">
           <div class="item-title-row"><h3></h3><span class="qty-pill"></span></div>
           <p class="code-line"></p>
+          <p class="observation-line" hidden></p>
         </div>
         <div class="item-actions">
           <button type="button" class="icon-action edit">Editar</button>

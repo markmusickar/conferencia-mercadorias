@@ -434,6 +434,7 @@ function addOrUpdateItem(event) {
     barcode: $("#barcode").value,
     description: $("#description").value,
     quantity: $("#quantity").value,
+    observation: $("#itemObservation").value,
     photo: currentPhoto
   }, "#formStatus", true);
   if (!item) return;
@@ -460,7 +461,7 @@ function collectItem(raw, statusSelector, requirePhoto) {
   if (!description) return showMessage(statusSelector, "Informe a descrição da mercadoria.");
   if (!Number.isFinite(quantity) || quantity < 1) return showMessage(statusSelector, "Informe uma quantidade válida.");
   if (requirePhoto && !photo) return showMessage(statusSelector, "Tire uma foto da mercadoria.");
-  return { barcode, description, quantity, photo };
+  return { barcode, description, quantity, photo, observation: String(raw.observation || "").trim() };
 }
 
 function handleDraftItemAction(event) {
@@ -481,6 +482,7 @@ function handleDraftItemAction(event) {
     $("#barcode").value = item.barcode;
     $("#description").value = item.description;
     $("#quantity").value = item.quantity;
+    $("#itemObservation").value = item.observation || "";
     currentPhoto = item.photo;
     renderPhotoPreview();
     $("#itemForm .primary-action").textContent = "Salvar alteração";
@@ -493,6 +495,9 @@ async function saveConference() {
   if (!draft.invoice) return showMessage("#conferenceStatus", "Informe o nome ou número da nota.", $("#invoiceNumber"));
   if (!draft.inspector) return showMessage("#conferenceStatus", "Informe o nome do conferente.", $("#inspectorName"));
   if (!draft.items.length) return showMessage("#conferenceStatus", "Adicione pelo menos um item à conferência.");
+
+  const { error: schemaError } = await supabaseClient.from("conference_items").select("observation").limit(0);
+  if (schemaError) return showMessage("#conferenceStatus", "Não foi possível verificar o campo de observação no banco. Peça ao administrador para aplicar supabase-observacao.sql e tente novamente. O rascunho foi mantido.");
 
   showMessage("#conferenceStatus", "Salvando no banco...");
   const now = new Date().toISOString();
@@ -712,6 +717,7 @@ async function mapConferenceItemToDb(item, conferenceId) {
     barcode: item.barcode,
     description: item.description,
     quantity: item.quantity,
+    observation: item.observation || "",
     photo_path: uploaded.path,
     photo_url: uploaded.url || item.photo
   };
@@ -738,17 +744,17 @@ async function exportExcel(conference) {
   if (!window.ExcelJS) return alert("O recurso de Excel não carregou. Verifique a internet e tente novamente.");
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Conferência", { views: [{ state: "frozen", ySplit: 5 }] });
-  sheet.columns = [{ key: "code", width: 22 }, { key: "description", width: 42 }, { key: "quantity", width: 14 }, { key: "date", width: 22 }, { key: "photo", width: 22 }];
+  sheet.columns = [{ key: "code", width: 22 }, { key: "description", width: 42 }, { key: "quantity", width: 14 }, { key: "date", width: 22 }, { key: "photo", width: 22 }, { key: "observation", width: 45 }];
   sheet.addRow(["CONFERÊNCIA DE MERCADORIAS"]);
-  sheet.mergeCells("A1:E1");
+  sheet.mergeCells("A1:F1");
   sheet.getCell("A1").font = { bold: true, size: 16, color: { argb: "FF0F766E" } };
   sheet.addRow(["Nota", conference.invoice]);
   sheet.addRow(["Conferente", conference.inspector]);
   sheet.addRow(["Salva em", formatDate(conference.savedAt || conference.updatedAt)]);
-  const header = sheet.addRow(["Código", "Descrição", "Quantidade", "Registrado em", "Foto"]);
+  const header = sheet.addRow(["Código", "Descrição", "Quantidade", "Registrado em", "Foto", "Observação"]);
   styleHeader(header);
   conference.items.forEach((item) => {
-    const row = sheet.addRow([item.barcode, item.description, item.quantity, formatDate(item.updatedAt), ""]);
+    const row = sheet.addRow([item.barcode, item.description, item.quantity, formatDate(item.updatedAt), "", item.observation || ""]);
     row.height = 72;
     if (item.photo?.startsWith("data:image")) {
       try {
@@ -786,8 +792,8 @@ function exportPdf(conference) {
   printReport({
     title: "Conferência de mercadorias",
     meta: [["Nota", conference.invoice], ["Conferente", conference.inspector], ["Data", formatDate(conference.savedAt || conference.updatedAt)]],
-    headers: ["Código", "Descrição", "Qtd.", "Foto"],
-    rows: conference.items.map((item) => [item.barcode, `<strong>${escapeHtml(item.description)}</strong>`, item.quantity, item.photo ? `<img src="${item.photo}" alt="Foto">` : "Sem foto"]),
+    headers: ["Código", "Descrição", "Qtd.", "Foto", "Observação"],
+    rows: conference.items.map((item) => [item.barcode, `<strong>${escapeHtml(item.description)}</strong>`, item.quantity, item.photo ? `<img src="${item.photo}" alt="Foto">` : "Sem foto", escapeHtml(item.observation || "")]),
     footer: `${conference.items.length} itens · ${sumUnits(conference.items)} unidades`
   });
 }
@@ -912,6 +918,9 @@ function renderItemList(selector, items, showPhoto) {
     node.querySelector("h3").textContent = item.description;
     node.querySelector(".qty-pill").textContent = `${item.quantity} un.`;
     node.querySelector(".code-line").textContent = `Código: ${item.barcode}` + (showPhoto ? "" : ` · Valor unitário: ${formatUnitPrice(item.unitPrice)}`);
+    const observation = node.querySelector(".observation-line");
+    observation.hidden = !showPhoto || !item.observation;
+    observation.textContent = item.observation ? `Observação: ${item.observation}` : "";
     if (showPhoto && item.photo) {
       const image = new Image();
       image.src = item.photo;
@@ -1162,6 +1171,7 @@ function mapConferenceFromDb(row) {
       description: item.description,
       quantity: Number(item.quantity),
       photo: item.photo_url || "",
+      observation: item.observation || "",
       createdAt: item.created_at,
       updatedAt: item.created_at
     }))
