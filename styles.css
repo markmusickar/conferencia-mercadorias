@@ -5,3 +5,6 @@
 .notice{margin:14px 0;padding:12px;border:1px solid #b7d8d4;border-radius:10px;background:#eef7f6;color:#315c58;line-height:1.45}.sql-box{margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:10px;background:#f8fafc}.sql-box ol{margin:8px 0 12px;padding-left:22px;color:#334155;line-height:1.55}.sql-box pre{overflow:auto;margin:0;padding:12px;border-radius:8px;background:#0f172a;color:#e2e8f0;white-space:pre-wrap;word-break:break-word}
 
 #itemObservation{width:100%;min-height:84px;padding:12px;border:1px solid var(--line);border-radius:8px;font:inherit;resize:vertical}.observation-line{margin:7px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink);font-size:.9rem}
+.loss-summary { padding: 20px; margin-bottom: 18px; }
+.loss-archive { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+.loss-archive input[type="checkbox"] { width: 20px; min-height: 20px; height: 20px; margin: 0; flex: 0 0 20px; }

@@ -106,6 +106,7 @@
             <p id="scanStatus" class="scan-status" role="status">Toque em Ler código para usar a câmera.</p>
 
             <label>Código de barras<input id="barcode" inputmode="numeric" placeholder="7890000000000" required></label>
+            <p id="lossBarcodeTotal" class="help-text" role="status" hidden></p>
             <label>Descrição<input id="description" placeholder="Ex.: Caixa de parafusos 10 mm" required></label>
             <div class="field-grid">
               <label>Quantidade<input id="quantity" type="number" inputmode="numeric" pattern="[0-9]*" min="1" step="1" placeholder="Digite a quantidade" required></label>
@@ -139,6 +140,21 @@
       </section>
 
       <section id="historyView" class="view">
+      <section id="lossAccumulated" class="panel loss-summary" hidden>
+        <div class="section-heading"><div><p class="eyebrow">Período atual</p><h2>Acumulado de perdas</h2><p id="lossAccumulatedTotal" class="help-text"></p></div></div>
+        <div class="button-row">
+          <button id="refreshLosses" type="button" class="tool-button">Atualizar</button>
+          <button id="exportLossExcel" type="button" class="tool-button">Excel do acumulado</button>
+          <button id="exportLossPdf" type="button" class="tool-button">PDF do acumulado</button>
+          <button id="resetLosses" type="button" class="tool-button danger" hidden>Zerar acumulado</button>
+        </div>
+        <p id="lossAccumulatedStatus" class="form-status" role="status"></p>
+        <div class="table-wrap"><table class="compare-table"><thead><tr><th>Código</th><th>Descrição</th><th>Quantidade acumulada</th><th>Observação</th></tr></thead><tbody id="lossAccumulatedRows"></tbody></table></div>
+        <p id="lossAccumulatedEmpty" class="help-text">Nenhuma perda acumulada neste período.</p>
+        <label class="loss-archive"><input id="lossArchiveToggle" type="checkbox"> Mostrar lançamentos dos períodos encerrados</label>
+      </section>
+
+
         <section class="panel history-panel">
           <div class="section-heading history-heading">
             <div><p class="eyebrow">Arquivo</p><h2 id="historyTitle">Conferências salvas</h2></div>
@@ -357,6 +373,6 @@
     <script src="https://unpkg.com/html5-qrcode" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js" crossorigin="anonymous"></script>
-    <script src="app.js?v=20261027-valor-unitario"></script>
+    <script src="app.js?v=20261031-perdas-acumuladas"></script>
   </body>
 </html>

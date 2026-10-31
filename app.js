@@ -196,6 +196,17 @@ function bindEvents() {
   $("#draftItems").addEventListener("click", handleDraftItemAction);
   $("#conferenceList").addEventListener("click", handleConferenceAction);
   $("#conferenceSearch").addEventListener("input", renderHistory);
+  $("#lossArchiveToggle").addEventListener("change", renderHistory);
+  $("#resetLosses").addEventListener("click", resetLosses);
+  $("#refreshLosses").addEventListener("click", async () => { await loadConferences(); renderHistory(); });
+  $("#exportLossExcel").addEventListener("click", () => exportExcel(buildLossSummary()));
+  $("#exportLossPdf").addEventListener("click", () => exportPdf(buildLossSummary()));
+  $("#barcode").addEventListener("input", showLossBarcodeTotal);
+  setInterval(async () => {
+    if (currentUser && !savingRecord && document.visibilityState === "visible" && $(".tab-button.active")?.dataset.view === "losses") {
+      await loadConferences(); renderHistory();
+    }
+  }, 20000);
   $("#startScan").addEventListener("click", startScanner);
   $("#stopScan").addEventListener("click", stopScanner);
   $("#barcodePhoto").addEventListener("change", scanCapturedPhoto);
@@ -311,9 +322,8 @@ async function loadConferences() {
 
   const { data, error } = await query;
   if (error) {
-    conferences = [];
-    losses = [];
-    return;
+    if (recordMode === "loss") showMessage("#lossAccumulatedStatus", "Não foi possível atualizar o acumulado. Tente novamente em Atualizar.");
+    return false;
   }
   const records = data.map(mapConferenceFromDb);
   conferences = records.filter(record => record.kind !== "loss");
@@ -368,6 +378,7 @@ function showView(name) {
     $("#newView").classList.add("active");
     $("#historyView").classList.add("active");
     renderHistory();
+    if (currentUser) loadConferences().then(() => { if (recordMode === "loss") renderHistory(); });
   } else $(`#${name}View`)?.classList.add("active");
   if (name === "products") loadProductCatalog();
   if (name === "history") renderHistory();
@@ -443,6 +454,7 @@ async function loadItemPhoto() {
 
 function addOrUpdateItem(event) {
   event.preventDefault();
+  if (recordMode === "loss" && draft.lossSubmission) return showMessage("#formStatus", "Reenvie o lançamento pendente em Salvar perdas antes de adicionar outros itens.");
   const item = collectItem({
     barcode: $("#barcode").value,
     description: $("#description").value,
@@ -455,6 +467,11 @@ function addOrUpdateItem(event) {
   const now = new Date().toISOString();
   if (editingItemId) {
     draft.items = draft.items.map((entry) => entry.id === editingItemId ? { ...entry, ...item, updatedAt: now } : entry);
+  } else if (recordMode === "loss" && draft.items.some(entry => entry.barcode === item.barcode)) {
+    draft.items = draft.items.map(entry => entry.barcode === item.barcode ? {
+      ...entry, ...item, quantity: Number(entry.quantity) + item.quantity,
+      observation: [entry.observation, item.observation].filter(Boolean).join("; "), updatedAt: now
+    } : entry);
   } else {
     draft.items.unshift({ id: makeId(), ...item, createdAt: now, updatedAt: now });
   }
@@ -478,6 +495,7 @@ function collectItem(raw, statusSelector, requirePhoto) {
 }
 
 function handleDraftItemAction(event) {
+  if (recordMode === "loss" && draft.lossSubmission) return showMessage("#formStatus", "Reenvie o lançamento pendente antes de editar os itens.");
   const button = event.target.closest("button");
   const card = event.target.closest(".item-card");
   if (!button || !card) return;
@@ -520,6 +538,7 @@ async function saveConference() {
 
 async function saveConferenceRecord() {
   saveDraftHeader();
+  if (recordMode === "loss") return saveLossBatch();
   if (!draft.invoice) return showMessage("#conferenceStatus", recordMode === "loss" ? "Informe a identificação da perda." : "Informe o nome ou número da nota.", $("#invoiceNumber"));
   if (!draft.inspector) return showMessage("#conferenceStatus", "Informe o nome do conferente.", $("#inspectorName"));
   if (!draft.items.length) return showMessage("#conferenceStatus", recordMode === "loss" ? "Adicione pelo menos um item à perda." : "Adicione pelo menos um item à conferência.");
@@ -564,6 +583,7 @@ async function saveConferenceRecord() {
 }
 
 function startNewConference() {
+  if (recordMode === "loss" && draft.lossSubmission) return showMessage("#conferenceStatus", "Reenvie o lançamento pendente para confirmar o salvamento antes de limpar.");
   const hasContent = draft.invoice || draft.inspector || draft.items.length;
   if (hasContent && !confirm(recordMode === "loss" ? "Limpar a perda atual e iniciar outra?" : "Limpar a conferência atual e iniciar outra?")) return;
   draft = blankConference();
@@ -586,6 +606,7 @@ function handleConferenceAction(event) {
 }
 
 function openConference(conference) {
+  if (conference.kind === "loss") return;
   switchRecordMode(conference.kind === "loss" ? "loss" : "conference");
   const hasOtherDraft = (draft.invoice || draft.inspector || draft.items.length) && draft.id !== conference.id;
   if (hasOtherDraft && !confirm(recordMode === "loss" ? "Substituir o rascunho atual por esta perda?" : "Substituir o rascunho atual por esta conferência?")) return;
@@ -597,6 +618,7 @@ function openConference(conference) {
 }
 
 async function deleteConference(conference) {
+  if (conference.kind === "loss") return;
   if (!confirm(`Excluir definitivamente ${conference.kind === "loss" ? "a perda" : "a conferência"} ${conference.invoice}?`)) return;
   const { error } = await supabaseClient.from("conferences").delete().eq("id", conference.id);
   if (error) return alert(`Não foi possível excluir: ${error.message}`);
@@ -969,7 +991,11 @@ function renderItemList(selector, items, showPhoto) {
 
 function renderHistory() {
   const query = $("#conferenceSearch").value.trim().toLocaleLowerCase("pt-BR");
-  const filtered = (recordMode === "loss" ? losses : conferences).filter((entry) => [entry.invoice, entry.inspector, ...entry.items.flatMap((item) => [item.barcode, item.description])]
+  const lossMode = recordMode === "loss";
+  $("#lossAccumulated").hidden = !lossMode;
+  if (lossMode) renderLossSummary();
+  const records = lossMode ? losses.filter(entry => $("#lossArchiveToggle").checked ? !!entry.closedAt : !entry.closedAt) : conferences;
+  const filtered = records.filter((entry) => [entry.invoice, entry.inspector, ...entry.items.flatMap((item) => [item.barcode, item.description])]
     .some((value) => String(value).toLocaleLowerCase("pt-BR").includes(query)));
   renderCards("#conferenceList", "#historyEmpty", filtered, "conference");
 }
@@ -994,6 +1020,11 @@ function renderCards(listSelector, emptySelector, records, type) {
     node.querySelector(".card-inspector").textContent = isOrder ? `Compras: ${record.buyer}` : `Conferente: ${record.inspector}`;
     node.querySelector(".card-summary").textContent = `${record.items.length} itens · ${sumUnits(record.items)} unidades`;
     node.querySelector(".export-pdf").textContent = isOrder ? "PDF" : "PDF com fotos";
+    if (record.kind === "loss") {
+      node.querySelector(".open-conference").hidden = true;
+      node.querySelector(".delete-conference").hidden = true;
+      node.querySelector(".card-invoice").textContent = record.closedAt ? `Período encerrado em ${formatDate(record.closedAt)}` : "Lançamento no acumulado";
+    }
     list.append(node);
   });
 }
@@ -1196,6 +1227,7 @@ function mapConferenceFromDb(row) {
   return {
     id: row.id,
     kind: row.record_kind || "conference",
+    closedAt: row.loss_closed_at || null,
     invoice: row.invoice_number,
     inspector: row.inspector_name,
     savedAt: row.updated_at || row.created_at,
@@ -1317,17 +1349,86 @@ function switchRecordMode(nextMode) {
     syncDraftFields();
   }
   const loss = recordMode === "loss";
+  $("#invoiceNumber").closest("label").hidden = loss;
+  $("#lossAccumulated").hidden = !loss;
+  $("#resetLosses").hidden = !loss || currentProfile?.role !== "admin";
+  $("#lossBarcodeTotal").hidden = !loss;
   $("#invoiceLabel").textContent = loss ? "Identificação da perda" : "Nome ou número da nota";
   $("#invoiceNumber").placeholder = loss ? "Ex.: Perdas de 31/10 — hortifruti" : "Ex.: NF 12345";
-  $("#recordHelp").textContent = loss ? "Registre as mercadorias perdidas e detalhe o motivo na observação." : "Registre a nota e os dados da mercadoria recebida.";
+  $("#recordHelp").textContent = loss ? "O mesmo código soma no acumulado ao salvar. Somente o administrador pode zerar o período." : "Registre a nota e os dados da mercadoria recebida.";
   $("#recordEyebrow").textContent = loss ? "Mercadoria perdida" : "Mercadoria recebida";
   $("#itemsEyebrow").textContent = loss ? "Itens da perda" : "Itens da nota";
   $("#currentListTitle").textContent = loss ? "Perda atual" : "Conferência atual";
-  $("#saveConference").textContent = loss ? "Salvar perda" : "Salvar conferência";
-  $("#historyTitle").textContent = loss ? "Perdas salvas" : "Conferências salvas";
+  $("#saveConference").textContent = loss ? "Salvar perdas no acumulado" : "Salvar conferência";
+  $("#historyTitle").textContent = loss ? "Lançamentos de perdas" : "Conferências salvas";
   $("#goToNew").textContent = loss ? "+ Nova perda" : "+ Nova conferência";
   $("#historyEmpty strong").textContent = loss ? "Nenhuma perda encontrada." : "Nenhuma conferência encontrada.";
   $("#historyEmpty p").textContent = loss ? "As perdas salvas aparecerão aqui." : "As conferências salvas aparecerão aqui.";
   $("#conferenceSearch").placeholder = loss ? "Pesquisar perda, conferente, código ou descrição" : "Pesquisar nota, conferente, código ou descrição";
   renderDraft();
+}
+
+
+function buildLossSummary(records = losses.filter(record => !record.closedAt)) {
+  const products = new Map();
+  for (const record of records) for (const item of record.items) {
+    const previous = products.get(item.barcode);
+    if (previous) {
+      previous.quantity += Number(item.quantity);
+      if (item.observation && !previous.notes.has(item.observation)) {
+        previous.notes.add(item.observation);
+        previous.observation = [...previous.notes].join("; ");
+      }
+    } else products.set(item.barcode, {...item, quantity: Number(item.quantity), notes: new Set(item.observation ? [item.observation] : [])});
+  }
+  return {kind:"loss", invoice:"Perdas acumuladas", inspector:currentProfile?.role === "admin" ? "Todos os colaboradores" : currentUser?.email || "", savedAt:new Date().toISOString(), items:[...products.values()].sort((a,b)=>a.description.localeCompare(b.description,"pt-BR"))};
+}
+
+function renderLossSummary() {
+  const summary = buildLossSummary();
+  $("#lossAccumulatedTotal").textContent = `${summary.items.length} ${summary.items.length === 1 ? "produto" : "produtos"} · ${sumUnits(summary.items)} unidades acumuladas`;
+  $("#lossAccumulatedRows").innerHTML = summary.items.map(item => `<tr><td>${escapeHtml(item.barcode)}</td><td>${escapeHtml(item.description)}</td><td><strong>${item.quantity}</strong></td><td>${escapeHtml(item.observation || "")}</td></tr>`).join("");
+  $("#lossAccumulatedEmpty").hidden = summary.items.length > 0;
+  $("#resetLosses").hidden = currentProfile?.role !== "admin";
+  showLossBarcodeTotal();
+}
+
+function showLossBarcodeTotal() {
+  if (recordMode !== "loss") return;
+  const barcode = $("#barcode").value.trim();
+  const saved = buildLossSummary().items.find(item => item.barcode === barcode)?.quantity || 0;
+  const pending = draft.items.filter(item => item.barcode === barcode).reduce((total,item)=>total+Number(item.quantity),0);
+  $("#lossBarcodeTotal").textContent = barcode ? `Este código: ${saved} unidades salvas + ${pending} neste lançamento. A quantidade informada será acrescentada ao salvar.` : "Códigos repetidos somam no acumulado ao salvar.";
+}
+
+async function saveLossBatch() {
+  if (!draft.inspector) return showMessage("#conferenceStatus", "Informe o nome do conferente.");
+  if (!draft.items.length) return showMessage("#conferenceStatus", "Adicione pelo menos um item à perda.");
+  if (draft.id) return showMessage("#conferenceStatus", "Inicie um novo lançamento para acrescentar perdas.");
+  if (!draft.lossSubmission) {
+    draft.lossSubmission = {requestId:makeId(),inspector:draft.inspector,items:JSON.parse(JSON.stringify(draft.items))};
+    if (!persistDraft()) { delete draft.lossSubmission; return; }
+  }
+  showMessage("#conferenceStatus", "Somando perdas no banco...");
+  const submission = draft.lossSubmission;
+  const items = await Promise.all(submission.items.map(item => mapConferenceItemToDb(item, submission.requestId)));
+  const {error} = await supabaseClient.rpc("add_loss_batch", {p_request_id:submission.requestId,p_inspector:submission.inspector,p_items:items});
+  if (error) return showMessage("#conferenceStatus", `Não foi possível confirmar: ${error.message}. Toque em Salvar perdas para reenviar o mesmo lançamento, sem duplicar.`);
+  localStorage.removeItem(keys.draft);
+  draft = blankConference(); syncDraftFields(); resetItemForm();
+  await loadConferences(); renderAll(); showView("losses");
+  showMessage("#conferenceStatus", "Perdas acrescentadas ao acumulado.");
+}
+
+async function resetLosses() {
+  if (currentProfile?.role !== "admin" || savingRecord) return;
+  if (!confirm("Zerar as perdas acumuladas de todos os colaboradores? Os lançamentos anteriores serão mantidos nos períodos encerrados.")) return;
+  const button = $("#resetLosses"); button.disabled = true;
+  try {
+    const {error} = await supabaseClient.rpc("close_loss_period");
+    if (error) return showMessage("#lossAccumulatedStatus", `Não foi possível zerar: ${error.message}`);
+    await loadConferences(); renderHistory();
+    showMessage("#lossAccumulatedStatus", "Acumulado zerado. O histórico foi mantido nos períodos encerrados.");
+  } catch (error) { showMessage("#lossAccumulatedStatus", "Não foi possível confirmar. Atualize os dados antes de tentar novamente."); }
+  finally { button.disabled = false; }
 }
