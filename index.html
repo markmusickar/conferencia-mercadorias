@@ -52,6 +52,7 @@
       <nav class="main-tabs" aria-label="Navegação principal">
         <button type="button" class="tab-button active" data-view="new">Nova conferência</button>
         <button type="button" class="tab-button" data-view="history">Conferências</button>
+        <button type="button" class="tab-button" data-view="losses">Perdas</button>
         <button type="button" class="tab-button" data-view="orders">Pedidos de compra</button>
         <button type="button" class="tab-button" data-view="compare">Comparar</button>
         <button type="button" class="tab-button" data-view="products" hidden>Produtos cadastrados</button>
@@ -64,13 +65,13 @@
             <div>
               <p class="eyebrow">Identificação</p>
               <h2 id="draftTitle">Nova conferência</h2>
-              <p class="help-text">Registre a nota e os dados da mercadoria recebida.</p>
+              <p id="recordHelp" class="help-text">Registre a nota e os dados da mercadoria recebida.</p>
             </div>
             <button type="button" id="newConference" class="secondary-action small">Limpar e iniciar nova</button>
           </div>
           <div class="conference-fields">
             <label>
-              Nome ou número da nota
+              <span id="invoiceLabel">Nome ou número da nota</span>
               <input id="invoiceNumber" autocomplete="off" placeholder="Ex.: NF 12345" required>
             </label>
             <label>
@@ -84,7 +85,7 @@
           <form id="itemForm" class="entry-panel panel" autocomplete="off" novalidate>
             <div class="section-heading item-heading">
               <div>
-                <p class="eyebrow">Mercadoria recebida</p>
+                <p id="recordEyebrow" class="eyebrow">Mercadoria recebida</p>
                 <h2>Adicionar item</h2>
               </div>
               <span id="draftCount" class="count-pill">0 itens</span>
@@ -121,7 +122,7 @@
 
           <section class="list-panel panel" aria-labelledby="currentListTitle">
             <div class="section-heading">
-              <div><p class="eyebrow">Itens da nota</p><h2 id="currentListTitle">Conferência atual</h2></div>
+              <div><p id="itemsEyebrow" class="eyebrow">Itens da nota</p><h2 id="currentListTitle">Conferência atual</h2></div>
               <span id="draftUnits" class="count-pill">0 unidades</span>
             </div>
             <div id="draftEmpty" class="empty-state compact-empty">
@@ -140,7 +141,7 @@
       <section id="historyView" class="view">
         <section class="panel history-panel">
           <div class="section-heading history-heading">
-            <div><p class="eyebrow">Arquivo</p><h2>Conferências salvas</h2></div>
+            <div><p class="eyebrow">Arquivo</p><h2 id="historyTitle">Conferências salvas</h2></div>
             <button type="button" id="goToNew" class="primary-action small">+ Nova conferência</button>
           </div>
           <div class="search-row">

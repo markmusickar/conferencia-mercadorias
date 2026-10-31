@@ -16,6 +16,10 @@ const blankOrder = () => ({ id: null, number: "", buyer: "", items: [], startedA
 let currentUser = null;
 let currentProfile = null;
 let conferences = [];
+let losses = [];
+let recordMode = "conference";
+const conferenceDraftKey = keys.draft;
+const lossDraftKey = "perdas-rascunho-online-v1";
 let orders = [];
 let draft = readJson(keys.draft, blankConference());
 let orderDraft = readJson(keys.orderDraft, blankOrder());
@@ -181,7 +185,7 @@ function bindEvents() {
   $("#logoutButton").addEventListener("click", logout);
   $$(".tab-button").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
 
-  $("#goToNew").addEventListener("click", () => showView("new"));
+  $("#goToNew").addEventListener("click", () => { if (recordMode === "loss") startNewConference(); showView(recordMode === "loss" ? "losses" : "new"); });
   $("#newConference").addEventListener("click", startNewConference);
   $("#clearForm").addEventListener("click", resetItemForm);
   $("#saveConference").addEventListener("click", saveConference);
@@ -253,6 +257,7 @@ async function logout() {
   currentUser = null;
   currentProfile = null;
   conferences = [];
+  losses = [];
   orders = [];
   $("#appShell").classList.add("app-hidden");
   $("#loginView").hidden = false;
@@ -307,9 +312,12 @@ async function loadConferences() {
   const { data, error } = await query;
   if (error) {
     conferences = [];
+    losses = [];
     return;
   }
-  conferences = data.map(mapConferenceFromDb);
+  const records = data.map(mapConferenceFromDb);
+  conferences = records.filter(record => record.kind !== "loss");
+  losses = records.filter(record => record.kind === "loss");
 }
 
 async function loadOrders() {
@@ -335,9 +343,9 @@ function syncSession() {
   $("#roleBadge").textContent = labels[role] || role;
 
   const allowed = {
-    conferente: ["new", "history"],
+    conferente: ["new", "history", "losses"],
     compras: ["orders"],
-    admin: ["new", "history", "orders", "compare", "products", "users"]
+    admin: ["new", "history", "losses", "orders", "compare", "products", "users"]
   }[role] || ["new", "history"];
 
   $$(".tab-button").forEach((button) => { button.hidden = !allowed.includes(button.dataset.view); });
@@ -353,9 +361,14 @@ function showView(name) {
   if (name === "products" && currentProfile?.role !== "admin") return;
   const targetButton = $(`.tab-button[data-view="${name}"]`);
   if (targetButton?.hidden) return;
+  if (["new", "history", "losses"].includes(name)) switchRecordMode(name === "losses" ? "loss" : "conference");
   $$(".tab-button").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
   $$(".view").forEach((view) => view.classList.remove("active"));
-  $(`#${name}View`)?.classList.add("active");
+  if (name === "losses") {
+    $("#newView").classList.add("active");
+    $("#historyView").classList.add("active");
+    renderHistory();
+  } else $(`#${name}View`)?.classList.add("active");
   if (name === "products") loadProductCatalog();
   if (name === "history") renderHistory();
   if (name === "orders") renderOrders();
@@ -490,18 +503,34 @@ function handleDraftItemAction(event) {
   }
 }
 
+let savingRecord = false;
 async function saveConference() {
-  saveDraftHeader();
-  if (!draft.invoice) return showMessage("#conferenceStatus", "Informe o nome ou número da nota.", $("#invoiceNumber"));
-  if (!draft.inspector) return showMessage("#conferenceStatus", "Informe o nome do conferente.", $("#inspectorName"));
-  if (!draft.items.length) return showMessage("#conferenceStatus", "Adicione pelo menos um item à conferência.");
+  if (savingRecord) return;
+  savingRecord = true;
+  const controls = $$(".main-tabs button, #newView button, #newView input, #newView textarea, #historyView button, #logoutButton");
+  const previousDisabled = controls.map(control => control.disabled);
+  controls.forEach(control => { control.disabled = true; });
+  try { await saveConferenceRecord(); }
+  catch (error) { showMessage("#conferenceStatus", "Não foi possível salvar. Seu rascunho foi mantido; tente novamente."); }
+  finally {
+    savingRecord = false;
+    controls.forEach((control, index) => { control.disabled = previousDisabled[index]; });
+  }
+}
 
-  const { error: schemaError } = await supabaseClient.from("conference_items").select("observation").limit(0);
-  if (schemaError) return showMessage("#conferenceStatus", "Não foi possível verificar o campo de observação no banco. Peça ao administrador para aplicar supabase-observacao.sql e tente novamente. O rascunho foi mantido.");
+async function saveConferenceRecord() {
+  saveDraftHeader();
+  if (!draft.invoice) return showMessage("#conferenceStatus", recordMode === "loss" ? "Informe a identificação da perda." : "Informe o nome ou número da nota.", $("#invoiceNumber"));
+  if (!draft.inspector) return showMessage("#conferenceStatus", "Informe o nome do conferente.", $("#inspectorName"));
+  if (!draft.items.length) return showMessage("#conferenceStatus", recordMode === "loss" ? "Adicione pelo menos um item à perda." : "Adicione pelo menos um item à conferência.");
+
+  const { error: schemaError } = await supabaseClient.from("conferences").select("record_kind").limit(0);
+  if (schemaError) return showMessage("#conferenceStatus", "Não foi possível verificar o banco de registros. Tente novamente. O rascunho foi mantido.");
 
   showMessage("#conferenceStatus", "Salvando no banco...");
   const now = new Date().toISOString();
   const payload = {
+    record_kind: recordMode,
     invoice_number: draft.invoice,
     inspector_name: draft.inspector,
     status: "salva",
@@ -516,7 +545,11 @@ async function saveConference() {
   const { data: conference, error } = await query;
   if (error) return showMessage("#conferenceStatus", `Erro ao salvar: ${error.message}`);
 
-  await supabaseClient.from("conference_items").delete().eq("conference_id", conference.id);
+  // Keep the saved ID so retrying a failed item upload updates this record.
+  draft.id = conference.id;
+  persistDraft();
+  const { error: deleteError } = await supabaseClient.from("conference_items").delete().eq("conference_id", conference.id);
+  if (deleteError) return showMessage("#conferenceStatus", `Erro ao atualizar itens: ${deleteError.message}`);
   const items = await Promise.all(draft.items.map((item) => mapConferenceItemToDb(item, conference.id)));
   const { error: itemError } = await supabaseClient.from("conference_items").insert(items);
   if (itemError) return showMessage("#conferenceStatus", `Erro nos itens: ${itemError.message}`);
@@ -527,12 +560,12 @@ async function saveConference() {
   resetItemForm();
   await loadConferences();
   renderAll();
-  showView("history");
+  showView(recordMode === "loss" ? "losses" : "history");
 }
 
 function startNewConference() {
   const hasContent = draft.invoice || draft.inspector || draft.items.length;
-  if (hasContent && !confirm("Limpar a conferência atual e iniciar outra?")) return;
+  if (hasContent && !confirm(recordMode === "loss" ? "Limpar a perda atual e iniciar outra?" : "Limpar a conferência atual e iniciar outra?")) return;
   draft = blankConference();
   localStorage.removeItem(keys.draft);
   syncDraftFields();
@@ -544,7 +577,7 @@ function handleConferenceAction(event) {
   const button = event.target.closest("button");
   const card = event.target.closest(".conference-card");
   if (!button || !card) return;
-  const conference = conferences.find((entry) => entry.id === card.dataset.id);
+  const conference = [...conferences, ...losses].find((entry) => entry.id === card.dataset.id);
   if (!conference) return;
   if (button.classList.contains("open-conference")) openConference(conference);
   if (button.classList.contains("export-excel")) exportExcel(conference);
@@ -553,17 +586,18 @@ function handleConferenceAction(event) {
 }
 
 function openConference(conference) {
+  switchRecordMode(conference.kind === "loss" ? "loss" : "conference");
   const hasOtherDraft = (draft.invoice || draft.inspector || draft.items.length) && draft.id !== conference.id;
-  if (hasOtherDraft && !confirm("Substituir o rascunho atual por esta conferência?")) return;
+  if (hasOtherDraft && !confirm(recordMode === "loss" ? "Substituir o rascunho atual por esta perda?" : "Substituir o rascunho atual por esta conferência?")) return;
   draft = JSON.parse(JSON.stringify(conference));
   persistDraft();
   syncDraftFields();
   renderDraft();
-  showView("new");
+  showView(recordMode === "loss" ? "losses" : "new");
 }
 
 async function deleteConference(conference) {
-  if (!confirm(`Excluir definitivamente a conferência ${conference.invoice}?`)) return;
+  if (!confirm(`Excluir definitivamente ${conference.kind === "loss" ? "a perda" : "a conferência"} ${conference.invoice}?`)) return;
   const { error } = await supabaseClient.from("conferences").delete().eq("id", conference.id);
   if (error) return alert(`Não foi possível excluir: ${error.message}`);
   await loadConferences();
@@ -743,12 +777,12 @@ async function uploadPhoto(dataUrl, conferenceId, itemId) {
 async function exportExcel(conference) {
   if (!window.ExcelJS) return alert("O recurso de Excel não carregou. Verifique a internet e tente novamente.");
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Conferência", { views: [{ state: "frozen", ySplit: 5 }] });
+  const sheet = workbook.addWorksheet(conference.kind === "loss" ? "Perdas" : "Conferência", { views: [{ state: "frozen", ySplit: 5 }] });
   sheet.columns = [{ key: "code", width: 22 }, { key: "description", width: 42 }, { key: "quantity", width: 14 }, { key: "date", width: 22 }, { key: "photo", width: 22 }, { key: "observation", width: 45 }];
-  sheet.addRow(["CONFERÊNCIA DE MERCADORIAS"]);
+  sheet.addRow([conference.kind === "loss" ? "REGISTRO DE PERDAS" : "CONFERÊNCIA DE MERCADORIAS"]);
   sheet.mergeCells("A1:F1");
   sheet.getCell("A1").font = { bold: true, size: 16, color: { argb: "FF0F766E" } };
-  sheet.addRow(["Nota", conference.invoice]);
+  sheet.addRow([conference.kind === "loss" ? "Identificação" : "Nota", conference.invoice]);
   sheet.addRow(["Conferente", conference.inspector]);
   sheet.addRow(["Salva em", formatDate(conference.savedAt || conference.updatedAt)]);
   const header = sheet.addRow(["Código", "Descrição", "Quantidade", "Registrado em", "Foto", "Observação"]);
@@ -790,8 +824,8 @@ async function exportOrderExcel(order) {
 
 function exportPdf(conference) {
   printReport({
-    title: "Conferência de mercadorias",
-    meta: [["Nota", conference.invoice], ["Conferente", conference.inspector], ["Data", formatDate(conference.savedAt || conference.updatedAt)]],
+    title: conference.kind === "loss" ? "Registro de perdas" : "Conferência de mercadorias",
+    meta: [[conference.kind === "loss" ? "Identificação" : "Nota", conference.invoice], ["Conferente", conference.inspector], ["Data", formatDate(conference.savedAt || conference.updatedAt)]],
     headers: ["Código", "Descrição", "Qtd.", "Foto", "Observação"],
     rows: conference.items.map((item) => [item.barcode, `<strong>${escapeHtml(item.description)}</strong>`, item.quantity, item.photo ? `<img src="${item.photo}" alt="Foto">` : "Sem foto", escapeHtml(item.observation || "")]),
     footer: `${conference.items.length} itens · ${sumUnits(conference.items)} unidades`
@@ -935,7 +969,7 @@ function renderItemList(selector, items, showPhoto) {
 
 function renderHistory() {
   const query = $("#conferenceSearch").value.trim().toLocaleLowerCase("pt-BR");
-  const filtered = conferences.filter((entry) => [entry.invoice, entry.inspector, ...entry.items.flatMap((item) => [item.barcode, item.description])]
+  const filtered = (recordMode === "loss" ? losses : conferences).filter((entry) => [entry.invoice, entry.inspector, ...entry.items.flatMap((item) => [item.barcode, item.description])]
     .some((value) => String(value).toLocaleLowerCase("pt-BR").includes(query)));
   renderCards("#conferenceList", "#historyEmpty", filtered, "conference");
 }
@@ -995,7 +1029,7 @@ function syncOrderFields() {
   updateOrderTitle();
 }
 
-function updateDraftTitle() { $("#draftTitle").textContent = draft.id ? `Editando: ${draft.invoice}` : "Nova conferência"; }
+function updateDraftTitle() { $("#draftTitle").textContent = draft.id ? `Editando: ${draft.invoice}` : recordMode === "loss" ? "Nova perda" : "Nova conferência"; }
 function updateOrderTitle() { $("#orderTitle").textContent = orderDraft.id ? `Editando: ${orderDraft.number}` : "Novo pedido de compra"; }
 
 function resetItemForm() {
@@ -1161,6 +1195,7 @@ function resizeImage(file) {
 function mapConferenceFromDb(row) {
   return {
     id: row.id,
+    kind: row.record_kind || "conference",
     invoice: row.invoice_number,
     inspector: row.inspector_name,
     savedAt: row.updated_at || row.created_at,
@@ -1265,4 +1300,34 @@ function parseUnitPrice(raw) {
 function formatUnitPrice(value) {
   return value == null || !Number.isFinite(Number(value)) ? "Não informado" :
     new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value));
+}
+
+
+// Conference and loss entry share the same editor, scanner, photos and reports.
+// Each mode has an independent persisted draft and a separate history.
+function switchRecordMode(nextMode) {
+  if (recordMode !== nextMode) {
+    saveDraftHeader();
+    recordMode = nextMode;
+    keys.draft = nextMode === "loss" ? lossDraftKey : conferenceDraftKey;
+    draft = readJson(keys.draft, blankConference());
+    resetItemForm();
+    $("#conferenceSearch").value = "";
+    $("#conferenceStatus").textContent = "";
+    syncDraftFields();
+  }
+  const loss = recordMode === "loss";
+  $("#invoiceLabel").textContent = loss ? "Identificação da perda" : "Nome ou número da nota";
+  $("#invoiceNumber").placeholder = loss ? "Ex.: Perdas de 31/10 — hortifruti" : "Ex.: NF 12345";
+  $("#recordHelp").textContent = loss ? "Registre as mercadorias perdidas e detalhe o motivo na observação." : "Registre a nota e os dados da mercadoria recebida.";
+  $("#recordEyebrow").textContent = loss ? "Mercadoria perdida" : "Mercadoria recebida";
+  $("#itemsEyebrow").textContent = loss ? "Itens da perda" : "Itens da nota";
+  $("#currentListTitle").textContent = loss ? "Perda atual" : "Conferência atual";
+  $("#saveConference").textContent = loss ? "Salvar perda" : "Salvar conferência";
+  $("#historyTitle").textContent = loss ? "Perdas salvas" : "Conferências salvas";
+  $("#goToNew").textContent = loss ? "+ Nova perda" : "+ Nova conferência";
+  $("#historyEmpty strong").textContent = loss ? "Nenhuma perda encontrada." : "Nenhuma conferência encontrada.";
+  $("#historyEmpty p").textContent = loss ? "As perdas salvas aparecerão aqui." : "As conferências salvas aparecerão aqui.";
+  $("#conferenceSearch").placeholder = loss ? "Pesquisar perda, conferente, código ou descrição" : "Pesquisar nota, conferente, código ou descrição";
+  renderDraft();
 }
