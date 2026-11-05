@@ -8,3 +8,5 @@
 .loss-summary { padding: 20px; margin-bottom: 18px; }
 .loss-archive { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
 .loss-archive input[type="checkbox"] { width: 20px; min-height: 20px; height: 20px; margin: 0; flex: 0 0 20px; }
+
+label.no-barcode-option{display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:400}label.no-barcode-option input{width:20px;min-height:20px;height:20px;margin:0;flex:0 0 20px}input:disabled{background:#f1f5f9;color:#64748b}

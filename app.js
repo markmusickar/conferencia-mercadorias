@@ -32,6 +32,23 @@ let messageTimer = null;
 let lastComparison = null;
 const productLookups = new Map();
 
+// A stable internal reference keeps products without barcodes distinct in storage and totals.
+const NO_BARCODE_PREFIX = "SEM-CODIGO:";
+function isWithoutBarcode(code) { return String(code || "").startsWith(NO_BARCODE_PREFIX); }
+function displayBarcode(code) { return isWithoutBarcode(code) ? "Sem código de barras" : code; }
+function syncNoBarcode(order = false, focus = false) {
+  const inputSelector = order ? "#orderBarcode" : "#barcode";
+  const input = $(inputSelector);
+  const checked = $(order ? "#orderNoBarcode" : "#noBarcode").checked;
+  input.disabled = checked;
+  input.required = !checked;
+  if (checked) {
+    input.value = "";
+    productLookups.set(inputSelector, {});
+    if (focus) $(order ? "#orderDescription" : "#description").focus();
+  }
+}
+
 function bindProductLookup(inputSelector, descriptionSelector, statusSelector) {
   let timer;
   $(inputSelector).addEventListener("keydown", async event => {
@@ -157,7 +174,7 @@ function renderProductCatalog() {
   $("#productCatalogRows").innerHTML = filtered.slice(catalogPage * catalogPageSize, (catalogPage + 1) * catalogPageSize)
     .map(product => "<tr><td><div class=\"thumb\">" + (validProductPhoto(product.photo_url)
       ? "<img loading=\"lazy\" src=\"" + escapeHtml(product.photo_url) + "\" alt=\"Foto de " + escapeHtml(product.description) + "\">"
-      : "<span>Sem foto</span>") + "</div></td><td>" + escapeHtml(product.barcode) + "</td><td>" + escapeHtml(product.description) +
+      : "<span>Sem foto</span>") + "</div></td><td>" + escapeHtml(displayBarcode(product.barcode)) + "</td><td>" + escapeHtml(product.description) +
       "</td><td>" + escapeHtml(product.updated_at ? formatDate(product.updated_at) : "-") + "</td></tr>").join("");
   $("#productCatalogEmpty").hidden = filtered.length > 0;
   $("#productCatalogPrevious").disabled = catalogPage === 0;
@@ -179,6 +196,8 @@ function bindEvents() {
   $("#refreshProductCatalog").addEventListener("click", loadProductCatalog);
   $("#productCatalogPrevious").addEventListener("click", () => { catalogPage = Math.max(0, catalogPage - 1); renderProductCatalog(); });
   $("#productCatalogNext").addEventListener("click", () => { catalogPage += 1; renderProductCatalog(); });
+  $("#noBarcode").addEventListener("change", () => syncNoBarcode(false, true));
+  $("#orderNoBarcode").addEventListener("change", () => syncNoBarcode(true, true));
   bindProductLookup("#barcode", "#description", "#formStatus");
   bindProductLookup("#orderBarcode", "#orderDescription", "#orderStatus");
   $("#loginForm").addEventListener("submit", login);
@@ -457,6 +476,7 @@ function addOrUpdateItem(event) {
   if (recordMode === "loss" && draft.lossSubmission) return showMessage("#formStatus", "Reenvie o lançamento pendente em Salvar perdas antes de adicionar outros itens.");
   const item = collectItem({
     barcode: $("#barcode").value,
+    noBarcode: $("#noBarcode").checked,
     description: $("#description").value,
     quantity: $("#quantity").value,
     observation: $("#itemObservation").value,
@@ -483,11 +503,12 @@ function addOrUpdateItem(event) {
 }
 
 function collectItem(raw, statusSelector, requirePhoto) {
-  const barcode = String(raw.barcode || "").trim();
+  let barcode = String(raw.barcode || "").trim();
   const description = String(raw.description || "").trim();
   const quantity = Number(raw.quantity);
   const photo = raw.photo || "";
-  if (!barcode) return showMessage(statusSelector, "Informe ou leia o código de barras.");
+  if (raw.noBarcode && description) barcode = NO_BARCODE_PREFIX + encodeURIComponent(description.normalize("NFC").toLocaleLowerCase("pt-BR").replace(/\s+/g, " "));
+  if (!barcode && !raw.noBarcode) return showMessage(statusSelector, "Informe ou leia o código de barras.");
   if (!description) return showMessage(statusSelector, "Informe a descrição da mercadoria.");
   if (!Number.isFinite(quantity) || quantity < 1) return showMessage(statusSelector, "Informe uma quantidade válida.");
   if (requirePhoto && !photo) return showMessage(statusSelector, "Tire uma foto da mercadoria.");
@@ -510,7 +531,9 @@ function handleDraftItemAction(event) {
   }
   if (button.classList.contains("edit")) {
     editingItemId = item.id;
+    $("#noBarcode").checked = isWithoutBarcode(item.barcode);
     $("#barcode").value = item.barcode;
+    syncNoBarcode(false);
     $("#description").value = item.description;
     $("#quantity").value = item.quantity;
     $("#itemObservation").value = item.observation || "";
@@ -637,6 +660,7 @@ function addOrUpdateOrderItem(event) {
   event.preventDefault();
   const item = collectItem({
     barcode: $("#orderBarcode").value,
+    noBarcode: $("#orderNoBarcode").checked,
     description: $("#orderDescription").value,
     quantity: $("#orderQuantity").value
   }, "#orderStatus", false);
@@ -673,7 +697,9 @@ function handleOrderItemAction(event) {
   }
   if (button.classList.contains("edit")) {
     editingOrderItemId = item.id;
+    $("#orderNoBarcode").checked = isWithoutBarcode(item.barcode);
     $("#orderBarcode").value = item.barcode;
+    syncNoBarcode(true);
     $("#orderDescription").value = item.description;
     $("#orderQuantity").value = item.quantity;
     $("#orderUnitPrice").value = item.unitPrice == null ? "" : Number(item.unitPrice).toFixed(2).replace(".", ",");
@@ -810,7 +836,7 @@ async function exportExcel(conference) {
   const header = sheet.addRow(["Código", "Descrição", "Quantidade", "Registrado em", "Foto", "Observação"]);
   styleHeader(header);
   conference.items.forEach((item) => {
-    const row = sheet.addRow([item.barcode, item.description, item.quantity, formatDate(item.updatedAt), "", item.observation || ""]);
+    const row = sheet.addRow([displayBarcode(item.barcode), item.description, item.quantity, formatDate(item.updatedAt), "", item.observation || ""]);
     row.height = 72;
     if (item.photo?.startsWith("data:image")) {
       try {
@@ -838,7 +864,7 @@ async function exportOrderExcel(order) {
   sheet.addRow(["Compras", order.buyer]);
   const header = sheet.addRow(["Código", "Descrição", "Quantidade pedida", "Valor unitário (R$)"]);
   styleHeader(header);
-  order.items.forEach((item) => sheet.addRow([item.barcode, item.description, item.quantity, item.unitPrice ?? null]));
+  order.items.forEach((item) => sheet.addRow([displayBarcode(item.barcode), item.description, item.quantity, item.unitPrice ?? null]));
   sheet.getColumn(4).numFmt = '"R$" #,##0.00';
   const buffer = await workbook.xlsx.writeBuffer();
   downloadBlob(buffer, `${safeName(order.number)}-pedido.xlsx`, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -849,7 +875,7 @@ function exportPdf(conference) {
     title: conference.kind === "loss" ? "Registro de perdas" : "Conferência de mercadorias",
     meta: [[conference.kind === "loss" ? "Identificação" : "Nota", conference.invoice], ["Conferente", conference.inspector], ["Data", formatDate(conference.savedAt || conference.updatedAt)]],
     headers: ["Código", "Descrição", "Qtd.", "Foto", "Observação"],
-    rows: conference.items.map((item) => [item.barcode, `<strong>${escapeHtml(item.description)}</strong>`, item.quantity, item.photo ? `<img src="${item.photo}" alt="Foto">` : "Sem foto", escapeHtml(item.observation || "")]),
+    rows: conference.items.map((item) => [displayBarcode(item.barcode), `<strong>${escapeHtml(item.description)}</strong>`, item.quantity, item.photo ? `<img src="${item.photo}" alt="Foto">` : "Sem foto", escapeHtml(item.observation || "")]),
     footer: `${conference.items.length} itens · ${sumUnits(conference.items)} unidades`
   });
 }
@@ -859,7 +885,7 @@ function exportOrderPdf(order) {
     title: "Pedido de compra",
     meta: [["Pedido", order.number], ["Compras", order.buyer], ["Data", formatDate(order.savedAt || order.updatedAt)]],
     headers: ["Código", "Descrição", "Quantidade pedida", "Valor unitário"],
-    rows: order.items.map((item) => [item.barcode, `<strong>${escapeHtml(item.description)}</strong>`, item.quantity, formatUnitPrice(item.unitPrice)]),
+    rows: order.items.map((item) => [displayBarcode(item.barcode), `<strong>${escapeHtml(item.description)}</strong>`, item.quantity, formatUnitPrice(item.unitPrice)]),
     footer: `${order.items.length} itens · ${sumUnits(order.items)} unidades`
   });
 }
@@ -907,7 +933,7 @@ function renderComparison(comparison) {
     <div class="table-wrap">
       <table class="compare-table">
         <thead><tr><th>Código</th><th>Descrição</th><th>Pedido</th><th>Recebido</th><th>Dif.</th><th>Status</th></tr></thead>
-        <tbody>${comparison.rows.map((row) => `<tr class="${row.status === "OK" ? "ok" : "warn"}"><td>${escapeHtml(row.barcode)}</td><td>${escapeHtml(row.description)}</td><td>${row.ordered}</td><td>${row.received}</td><td>${row.diff}</td><td>${row.status}</td></tr>`).join("")}</tbody>
+        <tbody>${comparison.rows.map((row) => `<tr class="${row.status === "OK" ? "ok" : "warn"}"><td>${escapeHtml(displayBarcode(row.barcode))}</td><td>${escapeHtml(row.description)}</td><td>${row.ordered}</td><td>${row.received}</td><td>${row.diff}</td><td>${row.status}</td></tr>`).join("")}</tbody>
       </table>
     </div>`;
 }
@@ -919,7 +945,7 @@ function exportComparisonPdf() {
     title: "Comparação pedido x conferência",
     meta: [["Pedido", lastComparison.order.number], ["Conferência", lastComparison.conference.invoice], ["Gerado em", formatDate(new Date().toISOString())]],
     headers: ["Código", "Descrição", "Pedido", "Recebido", "Dif.", "Status"],
-    rows: lastComparison.rows.map((row) => [row.barcode, `<strong>${escapeHtml(row.description)}</strong>`, row.ordered, row.received, row.diff, row.status]),
+    rows: lastComparison.rows.map((row) => [displayBarcode(row.barcode), `<strong>${escapeHtml(row.description)}</strong>`, row.ordered, row.received, row.diff, row.status]),
     footer: `${lastComparison.rows.filter((row) => row.status !== "OK").length} divergências`
   });
 }
@@ -973,7 +999,7 @@ function renderItemList(selector, items, showPhoto) {
     node.dataset.id = item.id;
     node.querySelector("h3").textContent = item.description;
     node.querySelector(".qty-pill").textContent = `${item.quantity} un.`;
-    node.querySelector(".code-line").textContent = `Código: ${item.barcode}` + (showPhoto ? "" : ` · Valor unitário: ${formatUnitPrice(item.unitPrice)}`);
+    node.querySelector(".code-line").textContent = `Código: ${displayBarcode(item.barcode)}` + (showPhoto ? "" : ` · Valor unitário: ${formatUnitPrice(item.unitPrice)}`);
     const observation = node.querySelector(".observation-line");
     observation.hidden = !showPhoto || !item.observation;
     observation.textContent = item.observation ? `Observação: ${item.observation}` : "";
@@ -995,14 +1021,14 @@ function renderHistory() {
   $("#lossAccumulated").hidden = !lossMode;
   if (lossMode) renderLossSummary();
   const records = lossMode ? losses.filter(entry => $("#lossArchiveToggle").checked ? !!entry.closedAt : !entry.closedAt) : conferences;
-  const filtered = records.filter((entry) => [entry.invoice, entry.inspector, ...entry.items.flatMap((item) => [item.barcode, item.description])]
+  const filtered = records.filter((entry) => [entry.invoice, entry.inspector, ...entry.items.flatMap((item) => [displayBarcode(item.barcode), item.description])]
     .some((value) => String(value).toLocaleLowerCase("pt-BR").includes(query)));
   renderCards("#conferenceList", "#historyEmpty", filtered, "conference");
 }
 
 function renderOrders() {
   const query = $("#orderSearch").value.trim().toLocaleLowerCase("pt-BR");
-  const filtered = orders.filter((entry) => [entry.number, entry.buyer, ...entry.items.flatMap((item) => [item.barcode, item.description])]
+  const filtered = orders.filter((entry) => [entry.number, entry.buyer, ...entry.items.flatMap((item) => [displayBarcode(item.barcode), item.description])]
     .some((value) => String(value).toLocaleLowerCase("pt-BR").includes(query)));
   renderCards("#ordersList", "#ordersEmpty", filtered, "order");
 }
@@ -1069,6 +1095,8 @@ function resetItemForm() {
   editingItemId = null;
   currentPhoto = "";
   $("#itemForm").reset();
+  $("#noBarcode").checked = false;
+  syncNoBarcode();
   $("#quantity").value = "";
   $("#itemForm .primary-action").textContent = "Adicionar item";
   renderPhotoPreview();
@@ -1078,6 +1106,8 @@ function resetOrderItemForm() {
   productLookups.set("#orderBarcode", {});
   delete $("#orderDescription").dataset.productDescription;
   editingOrderItemId = null;
+  $("#orderNoBarcode").checked = false;
+  syncNoBarcode(true);
   $("#orderBarcode").value = "";
   $("#orderDescription").value = "";
   $("#orderQuantity").value = "";
@@ -1162,6 +1192,8 @@ async function handleBarcode(value) {
   const config = getScannerConfig();
   const code = String(value || "").trim();
   if (!code) return;
+  $(scannerMode === "order" ? "#orderNoBarcode" : "#noBarcode").checked = false;
+  syncNoBarcode(scannerMode === "order");
   const description = $(config.nextSelector);
   if ($(config.inputSelector).value.trim() !== code && description.dataset.productDescription === description.value) description.value = "";
   delete description.dataset.productDescription;
@@ -1387,7 +1419,7 @@ function buildLossSummary(records = losses.filter(record => !record.closedAt)) {
 function renderLossSummary() {
   const summary = buildLossSummary();
   $("#lossAccumulatedTotal").textContent = `${summary.items.length} ${summary.items.length === 1 ? "produto" : "produtos"} · ${sumUnits(summary.items)} unidades acumuladas`;
-  $("#lossAccumulatedRows").innerHTML = summary.items.map(item => `<tr><td>${escapeHtml(item.barcode)}</td><td>${escapeHtml(item.description)}</td><td><strong>${item.quantity}</strong></td><td>${escapeHtml(item.observation || "")}</td></tr>`).join("");
+  $("#lossAccumulatedRows").innerHTML = summary.items.map(item => `<tr><td>${escapeHtml(displayBarcode(item.barcode))}</td><td>${escapeHtml(item.description)}</td><td><strong>${item.quantity}</strong></td><td>${escapeHtml(item.observation || "")}</td></tr>`).join("");
   $("#lossAccumulatedEmpty").hidden = summary.items.length > 0;
   $("#resetLosses").hidden = currentProfile?.role !== "admin";
   showLossBarcodeTotal();

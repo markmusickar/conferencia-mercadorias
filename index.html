@@ -9,7 +9,7 @@
     <meta name="apple-mobile-web-app-title" content="Conferências">
     <meta name="format-detection" content="telephone=no">
     <title>Conferência de Mercadorias</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=20261104-sem-codigo">
   </head>
   <body>
     <section id="loginView" class="login-view">
@@ -106,6 +106,7 @@
             <p id="scanStatus" class="scan-status" role="status">Toque em Ler código para usar a câmera.</p>
 
             <label>Código de barras<input id="barcode" inputmode="numeric" placeholder="7890000000000" required></label>
+            <label class="no-barcode-option"><input id="noBarcode" type="checkbox"> Produto sem código de barras</label>
             <p id="lossBarcodeTotal" class="help-text" role="status" hidden></p>
             <label>Descrição<input id="description" placeholder="Ex.: Caixa de parafusos 10 mm" required></label>
             <div class="field-grid">
@@ -201,6 +202,7 @@
             <p id="orderScanStatus" class="scan-status" role="status">Toque em Ler código para usar a câmera.</p>
 
             <label>Código de barras<input id="orderBarcode" inputmode="numeric" placeholder="7890000000000" required></label>
+            <label class="no-barcode-option"><input id="orderNoBarcode" type="checkbox"> Produto sem código de barras</label>
             <label>Descrição<input id="orderDescription" placeholder="Ex.: Caixa de parafusos 10 mm" required></label>
             <label>Quantidade pedida<input id="orderQuantity" type="number" inputmode="numeric" pattern="[0-9]*" min="1" step="1" placeholder="Digite a quantidade" required></label>
             <label>Valor unitário (R$)<input id="orderUnitPrice" inputmode="decimal" placeholder="Ex.: 12,50" required></label>
@@ -373,6 +375,6 @@
     <script src="https://unpkg.com/html5-qrcode" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js" crossorigin="anonymous"></script>
-    <script src="app.js?v=20261031-perdas-acumuladas"></script>
+    <script src="app.js?v=20261104-sem-codigo"></script>
   </body>
 </html>
