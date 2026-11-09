@@ -926,8 +926,8 @@ function renderComparison(comparison) {
   $("#compareEmpty").hidden = true;
   $("#compareResult").innerHTML = `
     <div class="compare-summary">
-      <span><strong>${comparison.order.number}</strong> pedido</span>
-      <span><strong>${comparison.conference.invoice}</strong> conferência</span>
+      <span><strong>${escapeHtml(comparison.order.number)}</strong> pedido</span>
+      <span><strong>${escapeHtml(comparison.conference.invoice)}</strong> conferência</span>
       <span><strong>${comparison.rows.filter((row) => row.status !== "OK").length}</strong> divergências</span>
     </div>
     <div class="table-wrap">
@@ -945,7 +945,7 @@ function exportComparisonPdf() {
     title: "Comparação pedido x conferência",
     meta: [["Pedido", lastComparison.order.number], ["Conferência", lastComparison.conference.invoice], ["Gerado em", formatDate(new Date().toISOString())]],
     headers: ["Código", "Descrição", "Pedido", "Recebido", "Dif.", "Status"],
-    rows: lastComparison.rows.map((row) => [displayBarcode(row.barcode), `<strong>${escapeHtml(row.description)}</strong>`, row.ordered, row.received, row.diff, row.status]),
+    rows: lastComparison.rows.map((row) => [escapeHtml(displayBarcode(row.barcode)), `<strong>${escapeHtml(row.description)}</strong>`, row.ordered, row.received, row.diff, row.status]),
     footer: `${lastComparison.rows.filter((row) => row.status !== "OK").length} divergências`
   });
 }
