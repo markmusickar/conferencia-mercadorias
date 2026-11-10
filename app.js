@@ -956,12 +956,18 @@ function printReport({ title, meta, headers, rows, footer }) {
   const metaHtml = meta.map(([label, value]) => `<p class="meta"><b>${escapeHtml(label)}:</b> ${escapeHtml(value)}</p>`).join("");
   const headHtml = headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("");
   const rowsHtml = rows.map((row) => `<tr>${row.map((cell) => `<td>${typeof cell === "number" ? cell : String(cell)}</td>`).join("")}</tr>`).join("");
-  printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
-    <style>@page{size:A4;margin:12mm}body{font:12px Arial;color:#1f2933}h1{color:#0f766e;margin-bottom:8px}.meta{margin:3px 0}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #cbd5e1;padding:7px;text-align:left;vertical-align:middle}th{background:#0f766e;color:white}img{width:110px;height:82px;object-fit:cover}.footer{margin-top:12px;color:#64748b}@media print{button{display:none}}</style></head><body>
+  const appUrl = JSON.stringify(location.href.split("#")[0]).replace(/</g, "\\u003c");
+  printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
+    <style>@page{size:A4;margin:12mm}body{font:12px Arial;color:#1f2933}h1{color:#0f766e;margin-bottom:8px}.meta{margin:3px 0}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #cbd5e1;padding:7px;text-align:left;vertical-align:middle}th{background:#0f766e;color:white}img{width:110px;height:82px;object-fit:cover}.footer{margin-top:12px;color:#64748b}.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.bar button{min-height:44px;padding:0 16px;font:600 15px Arial;border:2px solid #0f766e;border-radius:8px;background:#0f766e;color:#fff;cursor:pointer}.bar button.secondary{background:#fff;color:#0f766e}.table-scroll{overflow-x:auto}@media print{.bar,button{display:none}}</style></head><body>
+    <div class="bar"><button type="button" id="voltar">&larr; Voltar às conferências</button><button type="button" id="imprimir" class="secondary">Imprimir / salvar PDF</button></div>
     <h1>${escapeHtml(title)}</h1>${metaHtml}
-    <table><thead><tr>${headHtml}</tr></thead><tbody>${rowsHtml}</tbody></table>
+    <div class="table-scroll"><table><thead><tr>${headHtml}</tr></thead><tbody>${rowsHtml}</tbody></table></div>
     <p class="footer">${escapeHtml(footer)}</p>
-    <script>window.onload=()=>setTimeout(()=>window.print(),500)<\/script></body></html>`);
+    <script>
+    document.getElementById("voltar").onclick=()=>{window.close();setTimeout(()=>{if(!window.closed)location.href=${appUrl}},250)};
+    document.getElementById("imprimir").onclick=()=>window.print();
+    window.onload=()=>setTimeout(()=>window.print(),500)
+    <\/script></body></html>`);
   printWindow.document.close();
 }
 
