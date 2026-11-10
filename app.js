@@ -966,7 +966,6 @@ function printReport({ title, meta, headers, rows, footer }) {
     <script>
     document.getElementById("voltar").onclick=()=>{window.close();setTimeout(()=>{if(!window.closed)location.href=${appUrl}},250)};
     document.getElementById("imprimir").onclick=()=>window.print();
-    window.onload=()=>setTimeout(()=>window.print(),500)
     <\/script></body></html>`);
   printWindow.document.close();
 }
