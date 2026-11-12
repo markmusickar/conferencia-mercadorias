@@ -36,6 +36,7 @@ Sistema web para conferir mercadorias recebidas, feito em HTML, CSS e JavaScript
 1. Crie um projeto no Supabase.
 2. No `app.js`, confira `supabaseUrl` e `supabaseKey` no topo do arquivo. A chave `sb_publishable_...` é a chave pública, feita para ficar no navegador. **Nunca** coloque a chave `service_role` neste arquivo.
 3. No **SQL Editor** do Supabase, rode os arquivos `supabase-*.sql`.
+   - `supabase-salvar-conferencia.sql` cria a função `save_conference`: salva a conferência inteira de uma vez (tudo ou nada) e recusa o salvamento se outra pessoa alterou a mesma conferência depois que você a abriu. Sem ela o app continua salvando do jeito antigo, sem essa proteção.
 4. Publique a função `criar-conferente`, seguindo o passo a passo em `supabase-funcao-criar-conferente.md`.
 5. Abra o `index.html` no navegador, ou publique a pasta em um serviço de hospedagem de sites estáticos.
 
