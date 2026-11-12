@@ -484,6 +484,29 @@ function addOrUpdateItem(event) {
   }, "#formStatus", true);
   if (!item) return;
 
+  // Confere o código para não duplicar a quantidade: o mesmo produto não vira duas linhas na conferência.
+  const duplicate = recordMode === "loss" ? null : findItemByBarcode(draft.items, item.barcode, editingItemId);
+  const original = editingItemId ? draft.items.find((entry) => entry.id === editingItemId) : null;
+  // Ao alterar, só bloqueia se o código foi trocado para um que já existe (conferências antigas com repetição continuam editáveis).
+  if (duplicate && editingItemId && original?.barcode !== item.barcode) {
+    return showMessage("#formStatus", `O código ${displayBarcode(item.barcode)} já está em outro item (${duplicate.description}, ${duplicate.quantity} un.). Altere aquele item ou exclua um dos dois, para não duplicar a quantidade.`, $("#barcode"));
+  }
+  if (duplicate && !editingItemId) {
+    const total = Number(duplicate.quantity) + item.quantity;
+    const question = `O código ${displayBarcode(item.barcode)} já está na conferência:\n${duplicate.description}, ${duplicate.quantity} un.\n\nOK: somar ${item.quantity} un. a esse item (ficam ${total} un.).\nCancelar: não adicionar agora.`;
+    if (!confirm(question)) return showMessage("#formStatus", "Item não adicionado. Esse código já está na conferência.", $("#barcode"));
+    const nowMerge = new Date().toISOString();
+    draft.items = draft.items.map((entry) => entry.id === duplicate.id ? {
+      ...entry, quantity: total,
+      observation: [entry.observation, item.observation].filter(Boolean).join("; "), updatedAt: nowMerge
+    } : entry);
+    persistDraft();
+    showMessage("#formStatus", `Quantidade somada ao item existente: ${total} un.`);
+    resetItemForm();
+    renderDraft();
+    return;
+  }
+
   const now = new Date().toISOString();
   if (editingItemId) {
     draft.items = draft.items.map((entry) => entry.id === editingItemId ? { ...entry, ...item, updatedAt: now } : entry);
@@ -500,6 +523,24 @@ function addOrUpdateItem(event) {
   showMessage("#formStatus", editingItemId ? "Item atualizado." : "Item adicionado. Pode registrar o próximo.");
   resetItemForm();
   renderDraft();
+}
+
+// Itens com o mesmo código (inclui produto "sem código", cujo código interno vem da descrição).
+function findItemByBarcode(items, barcode, ignoreId) {
+  if (!barcode) return null;
+  return items.find((entry) => entry.id !== ignoreId && entry.barcode === barcode) || null;
+}
+
+function repeatedBarcodes(items) {
+  const groups = new Map();
+  items.forEach((entry) => {
+    if (!entry.barcode) return;
+    const group = groups.get(entry.barcode) || { barcode: entry.barcode, description: entry.description, lines: 0, units: 0 };
+    group.lines += 1;
+    group.units += Number(entry.quantity || 0);
+    groups.set(entry.barcode, group);
+  });
+  return [...groups.values()].filter((group) => group.lines > 1);
 }
 
 function collectItem(raw, statusSelector, requirePhoto) {
@@ -638,6 +679,12 @@ function openConference(conference) {
   syncDraftFields();
   renderDraft();
   showView(recordMode === "loss" ? "losses" : "new");
+  const repeated = recordMode === "loss" ? [] : repeatedBarcodes(draft.items);
+  if (repeated.length) {
+    const list = repeated.map((group) => `${group.description} (${displayBarcode(group.barcode)}: ${group.lines} linhas, ${group.units} un. no total)`).join("; ");
+    showMessage("#formStatus", `Atenção: código repetido nesta conferência. Confira para não contar a quantidade duas vezes: ${list}.`);
+    clearTimeout(messageTimer);  // este aviso fica na tela até a pessoa agir
+  }
 }
 
 async function deleteConference(conference) {
