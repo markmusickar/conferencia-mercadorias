@@ -607,10 +607,56 @@ async function saveConferenceRecord() {
   if (!draft.inspector) return showMessage("#conferenceStatus", "Informe o nome do conferente.", $("#inspectorName"));
   if (!draft.items.length) return showMessage("#conferenceStatus", recordMode === "loss" ? "Adicione pelo menos um item à perda." : "Adicione pelo menos um item à conferência.");
 
+  showMessage("#conferenceStatus", "Salvando no banco...");
+  // O mesmo número serve para reenviar sem duplicar se a resposta se perder.
+  if (!draft.id && !draft.pendingId) { draft.pendingId = makeUuid(); persistDraft(); }
+  const recordId = draft.id || draft.pendingId;
+  const items = await Promise.all(draft.items.map((item) => mapConferenceItemToDb(item, recordId)));
+  const { data, error } = await supabaseClient.rpc("save_conference", {
+    p_id: recordId,
+    p_invoice: draft.invoice,
+    p_inspector: draft.inspector,
+    p_items: items.map(({ conference_id, ...rest }) => rest),
+    p_expected_updated_at: draft.id ? (draft.baseUpdatedAt || null) : null
+  });
+  if (error) {
+    const text = error.message || "";
+    if (error.code === "PGRST202" || /Could not find the function/i.test(text)) return saveConferenceLegacy();
+    if (text.includes("CONFERENCIA_ALTERADA") || text.includes("CONFERENCIA_NAO_ENCONTRADA")) return handleSaveConflict(text);
+    return showMessage("#conferenceStatus", `Erro ao salvar: ${text}. Seu rascunho foi mantido.`);
+  }
+
+  localStorage.removeItem(keys.draft);
+  draft = blankConference();
+  syncDraftFields();
+  resetItemForm();
+  await loadConferences();
+  renderAll();
+  showView("history");
+}
+
+// Outra pessoa salvou esta conferência (ou a apagou) depois que você a abriu: nada foi gravado.
+async function handleSaveConflict(text) {
+  if (text.includes("CONFERENCIA_NAO_ENCONTRADA")) {
+    showMessage("#conferenceStatus", "Esta conferência foi excluída por outra pessoa. Nada foi salvo. Seu rascunho foi mantido.");
+    return;
+  }
+  const reload = confirm("Outra pessoa alterou esta conferência depois que você a abriu. NADA foi salvo, para não apagar o trabalho dela.\n\nOK = carregar a versão atual (suas alterações não salvas serão perdidas).\nCancelar = manter seu rascunho na tela.");
+  if (!reload) return showMessage("#conferenceStatus", "Nada foi salvo. Seu rascunho foi mantido; carregue a versão atual antes de salvar de novo.");
+  const id = draft.id;
+  localStorage.removeItem(keys.draft);
+  draft = blankConference();
+  await loadConferences();
+  renderAll();
+  const current = conferences.find((entry) => entry.id === id);
+  if (current) await openConference(current);
+}
+
+// Forma antiga (em etapas), usada só se a função nova ainda não foi criada no Supabase.
+async function saveConferenceLegacy() {
   const { error: schemaError } = await supabaseClient.from("conferences").select("record_kind").limit(0);
   if (schemaError) return showMessage("#conferenceStatus", "Não foi possível verificar o banco de registros. Tente novamente. O rascunho foi mantido.");
 
-  showMessage("#conferenceStatus", "Salvando no banco...");
   const now = new Date().toISOString();
   const payload = {
     record_kind: recordMode,
@@ -669,12 +715,31 @@ function handleConferenceAction(event) {
   if (button.classList.contains("delete-conference")) deleteConference(conference);
 }
 
-function openConference(conference) {
-  if (conference.kind === "loss") return;
+async function fetchFreshConference(id) {
+  try {
+    const { data, error } = await supabaseClient.from("conferences").select("*, conference_items(*)").eq("id", id).maybeSingle();
+    if (error) return { error };
+    return { record: data ? mapConferenceFromDb(data) : null };
+  } catch (error) { return { error }; }
+}
+
+async function openConference(cached) {
+  if (cached.kind === "loss") return;
+  // Pega a versão mais nova no banco: outra pessoa pode ter mexido depois que a lista foi carregada.
+  let conference = cached;
+  const fresh = await fetchFreshConference(cached.id);
+  if (!fresh.error && !fresh.record) {
+    alert("Esta conferência não existe mais (pode ter sido excluída). A lista será atualizada.");
+    await loadConferences();
+    renderAll();
+    return;
+  }
+  if (!fresh.error) conference = fresh.record;
   switchRecordMode(conference.kind === "loss" ? "loss" : "conference");
   const hasOtherDraft = (draft.invoice || draft.inspector || draft.items.length) && draft.id !== conference.id;
   if (hasOtherDraft && !confirm(recordMode === "loss" ? "Substituir o rascunho atual por esta perda?" : "Substituir o rascunho atual por esta conferência?")) return;
   draft = JSON.parse(JSON.stringify(conference));
+  draft.baseUpdatedAt = conference.updatedAt;  // texto exato do banco, para saber se mudou depois
   persistDraft();
   syncDraftFields();
   renderDraft();
@@ -840,7 +905,8 @@ async function deleteOrder(order) {
 }
 
 async function mapConferenceItemToDb(item, conferenceId) {
-  const uploaded = await uploadPhoto(item.photo, conferenceId, item.id);
+  const isNewPhoto = item.photo?.startsWith("data:image");
+  const uploaded = isNewPhoto ? await uploadPhoto(item.photo, conferenceId, item.id) : { path: item.photoPath || "", url: item.photo || "" };
   return {
     conference_id: conferenceId,
     barcode: item.barcode,
@@ -1322,6 +1388,7 @@ function mapConferenceFromDb(row) {
       description: item.description,
       quantity: Number(item.quantity),
       photo: item.photo_url || "",
+      photoPath: item.photo_path || "",
       observation: item.observation || "",
       createdAt: item.created_at,
       updatedAt: item.created_at
@@ -1360,6 +1427,13 @@ function dataUrlToBlob(dataUrl) {
 function persistDraft() { return writeJson(keys.draft, draft, "#formStatus"); }
 function persistOrderDraft() { return writeJson(keys.orderDraft, orderDraft, "#orderStatus"); }
 function sumUnits(items) { return items.reduce((sum, item) => sum + Number(item.quantity || 0), 0); }
+function makeUuid() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
 function makeId() { return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function formatDate(value) { return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)); }
 function safeName(value) { return String(value).replace(/[\\/:*?"<>|]+/g, "-").trim() || "arquivo"; }
