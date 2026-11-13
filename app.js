@@ -338,6 +338,7 @@ function bindEvents() {
 
   $("#goToNew").addEventListener("click", () => { if (recordMode === "loss") startNewConference(); showView(recordMode === "loss" ? "losses" : "new"); });
   $("#newConference").addEventListener("click", startNewConference);
+  $("#cancelEdit").addEventListener("click", cancelEdit);
   $("#clearForm").addEventListener("click", resetItemForm);
   $("#saveConference").addEventListener("click", saveConference);
   $("#invoiceNumber").addEventListener("input", saveDraftHeader);
@@ -1339,7 +1340,22 @@ function syncOrderFields() {
   updateOrderTitle();
 }
 
-function updateDraftTitle() { $("#draftTitle").textContent = draft.id ? `Editando: ${draft.invoice}` : recordMode === "loss" ? "Nova perda" : "Nova conferência"; }
+function updateDraftTitle() {
+  $("#draftTitle").textContent = draft.id ? `Editando: ${draft.invoice}` : recordMode === "loss" ? "Nova perda" : "Nova conferência";
+  $("#cancelEdit").hidden = !draft.id;
+}
+
+// Sai da edição sem salvar: a conferência continua como estava no banco.
+function cancelEdit() {
+  if (!draft.id) return;
+  if (!confirm("Cancelar a edição? As alterações que você fez NÃO serão salvas e a conferência continua como estava.")) return;
+  draft = blankConference();
+  localStorage.removeItem(keys.draft);
+  syncDraftFields();
+  resetItemForm();
+  renderDraft();
+  showView("history");
+}
 function updateOrderTitle() { $("#orderTitle").textContent = orderDraft.id ? `Editando: ${orderDraft.number}` : "Novo pedido de compra"; }
 
 function resetItemForm() {
