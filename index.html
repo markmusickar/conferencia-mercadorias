@@ -9,7 +9,7 @@
     <meta name="apple-mobile-web-app-title" content="Conferências">
     <meta name="format-detection" content="telephone=no">
     <title>Conferência de Mercadorias</title>
-    <link rel="stylesheet" href="styles.css?v=20261110-pdf-sem-impressao">
+    <link rel="stylesheet" href="styles.css?v=20261123-codigos-extras">
   </head>
   <body>
     <section id="loginView" class="login-view">
@@ -107,6 +107,13 @@
 
             <label>Código de barras<input id="barcode" inputmode="numeric" placeholder="7890000000000" required></label>
             <label class="no-barcode-option"><input id="noBarcode" type="checkbox"> Produto sem código de barras</label>
+            <details id="linkCodeBox" class="link-code">
+              <summary>Esse produto já existe com outro código?</summary>
+              <p class="help-text">Procure o produto já cadastrado. Os dois códigos passam a contar como o mesmo produto, em qualquer quantidade de códigos.</p>
+              <input id="linkSearch" type="search" placeholder="Nome ou código do produto já cadastrado" autocomplete="off">
+              <div id="linkResults" class="link-results"></div>
+              <p id="linkStatus" class="form-status" role="status"></p>
+            </details>
             <p id="lossBarcodeTotal" class="help-text" role="status" hidden></p>
             <label>Descrição<input id="description" placeholder="Ex.: Caixa de parafusos 10 mm" required></label>
             <div class="field-grid">
@@ -286,7 +293,7 @@
           <div class="table-wrap">
             <table class="compare-table">
               <caption class="help-text">Foto, código, descrição e última atualização dos produtos</caption>
-              <thead><tr><th scope="col">Foto</th><th scope="col">Código de barras</th><th scope="col">Descrição</th><th scope="col">Atualizado em</th></tr></thead>
+              <thead><tr><th scope="col">Foto</th><th scope="col">Código de barras</th><th scope="col">Descrição</th><th scope="col">Códigos extras</th><th scope="col">Atualizado em</th></tr></thead>
               <tbody id="productCatalogRows"></tbody>
             </table>
           </div>
@@ -375,6 +382,6 @@
     <script src="https://unpkg.com/html5-qrcode" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js" crossorigin="anonymous"></script>
-    <script src="app.js?v=20261112-salvar-atomico"></script>
+    <script src="app.js?v=20261123-codigos-extras"></script>
   </body>
 </html>

@@ -31,6 +31,40 @@ let scannerMode = "conference";
 let messageTimer = null;
 let lastComparison = null;
 const productLookups = new Map();
+// Códigos extras: vários códigos de barras do mesmo produto (comum em importados).
+let codeToProduct = new Map();
+let codesByProduct = new Map();
+function addCodeLink(code, main) {
+  codeToProduct.set(code, main);
+  const list = codesByProduct.get(main) || [];
+  if (!list.includes(code)) list.push(code);
+  codesByProduct.set(main, list);
+}
+function removeCodeLink(code) {
+  const main = codeToProduct.get(code);
+  codeToProduct.delete(code);
+  if (main) codesByProduct.set(main, (codesByProduct.get(main) || []).filter((entry) => entry !== code));
+}
+function canonicalCode(code) {
+  const clean = String(code || "").trim();
+  return codeToProduct.get(clean) || clean;
+}
+function allCodes(main) { return [main, ...(codesByProduct.get(main) || [])]; }
+function codesText(main) { return allCodes(main).map(displayBarcode).join(" / "); }
+function codesHtml(main) { return allCodes(main).map((code) => escapeHtml(displayBarcode(code))).join("<br>"); }
+async function loadProductCodes() {
+  codeToProduct = new Map();
+  codesByProduct = new Map();
+  if (!currentUser) return;
+  try {
+    for (let offset = 0; ; offset += 1000) {
+      const { data, error } = await supabaseClient.from("product_codes").select("code, product_barcode").order("code").range(offset, offset + 999);
+      if (error) return;  // sem a tabela (SQL ainda não executado), o sistema funciona como antes
+      for (const row of data || []) addCodeLink(row.code, row.product_barcode);
+      if (!data || data.length < 1000) break;
+    }
+  } catch (_) { /* segue sem os códigos extras */ }
+}
 
 // A stable internal reference keeps products without barcodes distinct in storage and totals.
 const NO_BARCODE_PREFIX = "SEM-CODIGO:";
@@ -76,12 +110,20 @@ function bindProductLookup(inputSelector, descriptionSelector, statusSelector) {
 }
 
 async function fillProductDescription(inputSelector, descriptionSelector, statusSelector) {
-  const code = $(inputSelector).value.trim();
+  let code = $(inputSelector).value.trim();
   const descriptionInput = $(descriptionSelector);
   const originalDescription = descriptionInput.value;
   const request = {};
   productLookups.set(inputSelector, request);
   if (!code || !currentUser) return false;
+  // Código extra de um produto: passa a valer o código principal, para a quantidade somar no mesmo item.
+  let aliasNote = "";
+  const mainCode = canonicalCode(code);
+  if (mainCode !== code) {
+    aliasNote = `Esse é outro código do mesmo produto (principal: ${displayBarcode(mainCode)}). `;
+    $(inputSelector).value = mainCode;
+    code = mainCode;
+  }
   const lookupUserId = currentUser.id;
   let product;
   try {
@@ -102,7 +144,7 @@ async function fillProductDescription(inputSelector, descriptionSelector, status
   if (product && !originalDescription.trim()) {
     descriptionInput.value = product.description;
     descriptionInput.dataset.productDescription = product.description;
-    showMessage(statusSelector, "Produto encontrado. Confira a descrição e informe a quantidade.");
+    showMessage(statusSelector, aliasNote + "Produto encontrado. Confira a descrição e informe a quantidade.");
     return true;
   }
   if (!product) showMessage(statusSelector, "Produto não cadastrado. Informe a descrição; ela será guardada ao salvar a conferência.");
@@ -158,6 +200,64 @@ async function loadProductCatalog() {
   }
 }
 
+let linkTimer = null;
+function searchLinkTarget() {
+  clearTimeout(linkTimer);
+  linkTimer = setTimeout(async () => {
+    const results = $("#linkResults");
+    const query = $("#linkSearch").value.trim().replace(/[,()%*\\]/g, " ");
+    results.innerHTML = "";
+    if (query.length < 2 || !currentUser) return;
+    const { data, error } = await supabaseClient.from("products").select("barcode, description")
+      .or(`barcode.ilike.%${query}%,description.ilike.%${query}%`).order("description").limit(8);
+    if (error) { $("#linkStatus").textContent = "Não foi possível procurar agora. Tente de novo."; return; }
+    if (!data?.length) { $("#linkStatus").textContent = "Nenhum produto encontrado com esse nome ou código."; return; }
+    $("#linkStatus").textContent = "";
+    for (const product of data) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "link-result";
+      button.textContent = `${product.description} (${displayBarcode(product.barcode)})`;
+      button.addEventListener("click", () => linkCurrentCode(product.barcode));
+      results.append(button);
+    }
+  }, 300);
+}
+
+async function linkCurrentCode(mainCode) {
+  const status = $("#linkStatus");
+  const code = $("#barcode").value.trim();
+  if (!code || $("#noBarcode").checked) { status.textContent = "Primeiro leia ou digite o código que você quer vincular."; return; }
+  if (canonicalCode(code) === canonicalCode(mainCode)) { status.textContent = "Esse código já pertence a esse produto."; return; }
+  status.textContent = "Vinculando...";
+  const { error } = await supabaseClient.rpc("link_product_code", { p_code: code, p_product_barcode: mainCode });
+  if (error) {
+    status.textContent = /link_product_code|schema cache|does not exist/i.test(error.message || "")
+      ? "Falta executar o SQL de códigos extras no Supabase."
+      : (error.message || "Não foi possível vincular.");
+    return;
+  }
+  addCodeLink(code, canonicalCode(mainCode));
+  $("#linkSearch").value = "";
+  $("#linkResults").innerHTML = "";
+  status.textContent = "";
+  $("#linkCodeBox").open = false;
+  await fillProductDescription("#barcode", "#description", "#formStatus");
+  renderProductCatalog();
+}
+
+async function unlinkFromCatalog(event) {
+  const button = event.target.closest(".unlink-code");
+  if (!button) return;
+  const code = button.dataset.code;
+  if (!confirm(`Desvincular o código ${code}? Ele deixa de contar junto com o produto.`)) return;
+  const { error } = await supabaseClient.rpc("unlink_product_code", { p_code: code });
+  if (error) { $("#productCatalogStatus").textContent = error.message || "Não foi possível desvincular."; return; }
+  removeCodeLink(code);
+  $("#productCatalogStatus").textContent = "";
+  renderProductCatalog();
+}
+
 function validProductPhoto(url) {
   return typeof url === "string" && /^(https?:\/\/|data:image\/(?:png|jpeg|webp|gif);base64,)/i.test(url);
 }
@@ -167,6 +267,7 @@ function renderProductCatalog() {
   const query = $("#productCatalogSearch").value.trim().toLocaleLowerCase("pt-BR");
   const filtered = catalogProducts.filter(product =>
     product.barcode.toLocaleLowerCase("pt-BR").includes(query) ||
+    (codesByProduct.get(product.barcode) || []).some(code => code.toLocaleLowerCase("pt-BR").includes(query)) ||
     product.description.toLocaleLowerCase("pt-BR").includes(query));
   const pages = Math.max(1, Math.ceil(filtered.length / catalogPageSize));
   catalogPage = Math.min(catalogPage, pages - 1);
@@ -175,6 +276,8 @@ function renderProductCatalog() {
     .map(product => "<tr><td><div class=\"thumb\">" + (validProductPhoto(product.photo_url)
       ? "<img loading=\"lazy\" src=\"" + escapeHtml(product.photo_url) + "\" alt=\"Foto de " + escapeHtml(product.description) + "\">"
       : "<span>Sem foto</span>") + "</div></td><td>" + escapeHtml(displayBarcode(product.barcode)) + "</td><td>" + escapeHtml(product.description) +
+      "</td><td>" + (codesByProduct.get(product.barcode) || []).map(code => "<span class=\"extra-code\">" + escapeHtml(code) +
+      " <button type=\"button\" class=\"unlink-code\" data-code=\"" + escapeHtml(code) + "\" aria-label=\"Desvincular " + escapeHtml(code) + "\">×</button></span>").join(" ") +
       "</td><td>" + escapeHtml(product.updated_at ? formatDate(product.updated_at) : "-") + "</td></tr>").join("");
   $("#productCatalogEmpty").hidden = filtered.length > 0;
   $("#productCatalogPrevious").disabled = catalogPage === 0;
@@ -193,6 +296,8 @@ function bindEvents() {
     event.target.replaceWith(fallback);
   }, true);
   $("#productCatalogSearch").addEventListener("input", () => { catalogPage = 0; renderProductCatalog(); });
+  $("#productCatalogRows").addEventListener("click", unlinkFromCatalog);
+  $("#linkSearch").addEventListener("input", searchLinkTarget);
   $("#refreshProductCatalog").addEventListener("click", loadProductCatalog);
   $("#productCatalogPrevious").addEventListener("click", () => { catalogPage = Math.max(0, catalogPage - 1); renderProductCatalog(); });
   $("#productCatalogNext").addEventListener("click", () => { catalogPage += 1; renderProductCatalog(); });
@@ -281,6 +386,8 @@ async function login(event) {
 async function logout() {
   catalogRequest += 1;
   catalogProducts = [];
+  codeToProduct = new Map();
+  codesByProduct = new Map();
   $("#productCatalogRows").innerHTML = "";
   $("#productCatalogSearch").value = "";
   await supabaseClient.auth.signOut();
@@ -326,7 +433,7 @@ async function loadProfile() {
 }
 
 async function loadRemoteData() {
-  await Promise.all([loadConferences(), loadOrders()]);
+  await Promise.all([loadConferences(), loadOrders(), loadProductCodes()]);
 }
 
 async function loadConferences() {
@@ -544,7 +651,7 @@ function repeatedBarcodes(items) {
 }
 
 function collectItem(raw, statusSelector, requirePhoto) {
-  let barcode = String(raw.barcode || "").trim();
+  let barcode = canonicalCode(raw.barcode);
   const description = String(raw.description || "").trim();
   const quantity = Number(raw.quantity);
   const photo = raw.photo || "";
@@ -949,7 +1056,7 @@ async function exportExcel(conference) {
   const header = sheet.addRow(["Código", "Descrição", "Quantidade", "Registrado em", "Foto", "Observação"]);
   styleHeader(header);
   conference.items.forEach((item) => {
-    const row = sheet.addRow([displayBarcode(item.barcode), item.description, item.quantity, formatDate(item.updatedAt), "", item.observation || ""]);
+    const row = sheet.addRow([codesText(item.barcode), item.description, item.quantity, formatDate(item.updatedAt), "", item.observation || ""]);
     row.height = 72;
     if (item.photo?.startsWith("data:image")) {
       try {
@@ -977,7 +1084,7 @@ async function exportOrderExcel(order) {
   sheet.addRow(["Compras", order.buyer]);
   const header = sheet.addRow(["Código", "Descrição", "Quantidade pedida", "Valor unitário (R$)"]);
   styleHeader(header);
-  order.items.forEach((item) => sheet.addRow([displayBarcode(item.barcode), item.description, item.quantity, item.unitPrice ?? null]));
+  order.items.forEach((item) => sheet.addRow([codesText(item.barcode), item.description, item.quantity, item.unitPrice ?? null]));
   sheet.getColumn(4).numFmt = '"R$" #,##0.00';
   const buffer = await workbook.xlsx.writeBuffer();
   downloadBlob(buffer, `${safeName(order.number)}-pedido.xlsx`, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -988,7 +1095,7 @@ function exportPdf(conference) {
     title: conference.kind === "loss" ? "Registro de perdas" : "Conferência de mercadorias",
     meta: [[conference.kind === "loss" ? "Identificação" : "Nota", conference.invoice], ["Conferente", conference.inspector], ["Data", formatDate(conference.savedAt || conference.updatedAt)]],
     headers: ["Código", "Descrição", "Qtd.", "Foto", "Observação"],
-    rows: conference.items.map((item) => [displayBarcode(item.barcode), `<strong>${escapeHtml(item.description)}</strong>`, item.quantity, item.photo ? `<img src="${item.photo}" alt="Foto">` : "Sem foto", escapeHtml(item.observation || "")]),
+    rows: conference.items.map((item) => [codesHtml(item.barcode), `<strong>${escapeHtml(item.description)}</strong>`, item.quantity, item.photo ? `<img src="${item.photo}" alt="Foto">` : "Sem foto", escapeHtml(item.observation || "")]),
     footer: `${conference.items.length} itens · ${sumUnits(conference.items)} unidades`
   });
 }
@@ -998,7 +1105,7 @@ function exportOrderPdf(order) {
     title: "Pedido de compra",
     meta: [["Pedido", order.number], ["Compras", order.buyer], ["Data", formatDate(order.savedAt || order.updatedAt)]],
     headers: ["Código", "Descrição", "Quantidade pedida", "Valor unitário"],
-    rows: order.items.map((item) => [displayBarcode(item.barcode), `<strong>${escapeHtml(item.description)}</strong>`, item.quantity, formatUnitPrice(item.unitPrice)]),
+    rows: order.items.map((item) => [codesHtml(item.barcode), `<strong>${escapeHtml(item.description)}</strong>`, item.quantity, formatUnitPrice(item.unitPrice)]),
     footer: `${order.items.length} itens · ${sumUnits(order.items)} unidades`
   });
 }
@@ -1046,7 +1153,7 @@ function renderComparison(comparison) {
     <div class="table-wrap">
       <table class="compare-table">
         <thead><tr><th>Código</th><th>Descrição</th><th>Pedido</th><th>Recebido</th><th>Dif.</th><th>Status</th></tr></thead>
-        <tbody>${comparison.rows.map((row) => `<tr class="${row.status === "OK" ? "ok" : "warn"}"><td>${escapeHtml(displayBarcode(row.barcode))}</td><td>${escapeHtml(row.description)}</td><td>${row.ordered}</td><td>${row.received}</td><td>${row.diff}</td><td>${row.status}</td></tr>`).join("")}</tbody>
+        <tbody>${comparison.rows.map((row) => `<tr class="${row.status === "OK" ? "ok" : "warn"}"><td>${codesHtml(row.barcode)}</td><td>${escapeHtml(row.description)}</td><td>${row.ordered}</td><td>${row.received}</td><td>${row.diff}</td><td>${row.status}</td></tr>`).join("")}</tbody>
       </table>
     </div>`;
 }
@@ -1058,7 +1165,7 @@ function exportComparisonPdf() {
     title: "Comparação pedido x conferência",
     meta: [["Pedido", lastComparison.order.number], ["Conferência", lastComparison.conference.invoice], ["Gerado em", formatDate(new Date().toISOString())]],
     headers: ["Código", "Descrição", "Pedido", "Recebido", "Dif.", "Status"],
-    rows: lastComparison.rows.map((row) => [escapeHtml(displayBarcode(row.barcode)), `<strong>${escapeHtml(row.description)}</strong>`, row.ordered, row.received, row.diff, row.status]),
+    rows: lastComparison.rows.map((row) => [codesHtml(row.barcode), `<strong>${escapeHtml(row.description)}</strong>`, row.ordered, row.received, row.diff, row.status]),
     footer: `${lastComparison.rows.filter((row) => row.status !== "OK").length} divergências`
   });
 }
@@ -1117,7 +1224,7 @@ function renderItemList(selector, items, showPhoto) {
     node.dataset.id = item.id;
     node.querySelector("h3").textContent = item.description;
     node.querySelector(".qty-pill").textContent = `${item.quantity} un.`;
-    node.querySelector(".code-line").textContent = `Código: ${displayBarcode(item.barcode)}` + (showPhoto ? "" : ` · Valor unitário: ${formatUnitPrice(item.unitPrice)}`);
+    node.querySelector(".code-line").textContent = `Código: ${codesText(item.barcode)}` + (showPhoto ? "" : ` · Valor unitário: ${formatUnitPrice(item.unitPrice)}`);
     const observation = node.querySelector(".observation-line");
     observation.hidden = !showPhoto || !item.observation;
     observation.textContent = item.observation ? `Observação: ${item.observation}` : "";

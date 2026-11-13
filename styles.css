@@ -10,3 +10,12 @@
 .loss-archive input[type="checkbox"] { width: 20px; min-height: 20px; height: 20px; margin: 0; flex: 0 0 20px; }
 
 label.no-barcode-option{display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:400}label.no-barcode-option input{width:20px;min-height:20px;height:20px;margin:0;flex:0 0 20px}input:disabled{background:#f1f5f9;color:#64748b}
+
+.link-code{margin:6px 0 12px;padding:10px 12px;border:1px dashed #94a3b8;border-radius:10px;background:#f8fafc}
+.link-code summary{cursor:pointer;font-weight:800;color:#0f766e}
+.link-code input{margin-top:6px}
+.link-results{display:grid;gap:6px;margin-top:8px}
+.link-result{min-height:44px;padding:8px 12px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;text-align:left;font:inherit;font-weight:700;cursor:pointer}
+.link-result:hover{background:#ecfdf5}
+.extra-code{display:inline-block;margin:2px 4px 2px 0;padding:2px 4px 2px 8px;border-radius:999px;background:#eef7f6;font-size:.85rem}
+.unlink-code{border:0;background:transparent;color:#b42318;font-weight:900;cursor:pointer;padding:0 6px}
