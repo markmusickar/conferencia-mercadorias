@@ -52,6 +52,13 @@ function canonicalCode(code) {
 function allCodes(main) { return [main, ...(codesByProduct.get(main) || [])]; }
 function codesText(main) { return allCodes(main).map(displayBarcode).join(" / "); }
 function codesHtml(main) { return allCodes(main).map((code) => escapeHtml(displayBarcode(code))).join("<br>"); }
+// Grava no banco os vínculos feitos com produtos que ainda não estavam salvos (o produto passa a existir ao salvar a conferência).
+async function flushPendingLinks() {
+  for (const link of draft.pendingLinks || []) {
+    try { await supabaseClient.rpc("link_product_code", { p_code: link.code, p_product_barcode: link.main }); } catch (_) { /* tenta de novo pelo botão de vincular */ }
+  }
+  await loadProductCodes();
+}
 async function loadProductCodes() {
   codeToProduct = new Map();
   codesByProduct = new Map();
@@ -64,6 +71,7 @@ async function loadProductCodes() {
       if (!data || data.length < 1000) break;
     }
   } catch (_) { /* segue sem os códigos extras */ }
+  for (const link of (typeof draft === "object" && draft?.pendingLinks) || []) addCodeLink(link.code, link.main);
 }
 
 // A stable internal reference keeps products without barcodes distinct in storage and totals.
@@ -211,24 +219,43 @@ function searchLinkTarget() {
     const { data, error } = await supabaseClient.from("products").select("barcode, description")
       .or(`barcode.ilike.%${query}%,description.ilike.%${query}%`).order("description").limit(8);
     if (error) { $("#linkStatus").textContent = "Não foi possível procurar agora. Tente de novo."; return; }
-    if (!data?.length) { $("#linkStatus").textContent = "Nenhum produto encontrado com esse nome ou código."; return; }
+    // Itens da conferência atual que ainda não foram salvos também podem ser o produto principal.
+    const lower = query.toLocaleLowerCase("pt-BR");
+    const found = new Set((data || []).map((product) => product.barcode));
+    const fromDraft = (draft.items || []).filter((item) => item.barcode && !found.has(canonicalCode(item.barcode)) &&
+      (item.barcode.toLocaleLowerCase("pt-BR").includes(lower) || String(item.description || "").toLocaleLowerCase("pt-BR").includes(lower)))
+      .map((item) => ({ barcode: canonicalCode(item.barcode), description: item.description, fromDraft: true }));
+    const list = [...(data || []), ...fromDraft].slice(0, 10);
+    if (!list.length) { $("#linkStatus").textContent = "Nenhum produto encontrado com esse nome ou código."; return; }
     $("#linkStatus").textContent = "";
-    for (const product of data) {
+    for (const product of list) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "link-result";
       button.textContent = `${product.description} (${displayBarcode(product.barcode)})`;
-      button.addEventListener("click", () => linkCurrentCode(product.barcode));
+      button.addEventListener("click", () => linkCurrentCode(product.barcode, product.fromDraft));
       results.append(button);
     }
   }, 300);
 }
 
-async function linkCurrentCode(mainCode) {
+async function linkCurrentCode(mainCode, fromDraft = false) {
   const status = $("#linkStatus");
   const code = $("#barcode").value.trim();
   if (!code || $("#noBarcode").checked) { status.textContent = "Primeiro leia ou digite o código que você quer vincular."; return; }
   if (canonicalCode(code) === canonicalCode(mainCode)) { status.textContent = "Esse código já pertence a esse produto."; return; }
+  if (fromDraft) {
+    // Produto ainda não salvo: vale já nesta conferência e é gravado no banco quando você salvar.
+    draft.pendingLinks = (draft.pendingLinks || []).filter((link) => link.code !== code).concat({ code, main: canonicalCode(mainCode) });
+    persistDraft();
+    addCodeLink(code, canonicalCode(mainCode));
+    $("#linkSearch").value = "";
+    $("#linkResults").innerHTML = "";
+    status.textContent = "";
+    $("#linkCodeBox").open = false;
+    await fillProductDescription("#barcode", "#description", "#formStatus");
+    return;
+  }
   status.textContent = "Vinculando...";
   const { error } = await supabaseClient.rpc("link_product_code", { p_code: code, p_product_barcode: mainCode });
   if (error) {
@@ -733,6 +760,7 @@ async function saveConferenceRecord() {
     return showMessage("#conferenceStatus", `Erro ao salvar: ${text}. Seu rascunho foi mantido.`);
   }
 
+  await flushPendingLinks();
   localStorage.removeItem(keys.draft);
   draft = blankConference();
   syncDraftFields();
