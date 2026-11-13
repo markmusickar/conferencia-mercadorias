@@ -41,3 +41,7 @@ Sistema web para conferir mercadorias recebidas, feito em HTML, CSS e JavaScript
 5. Abra o `index.html` no navegador, ou publique a pasta em um serviço de hospedagem de sites estáticos.
 
 > Atenção: este repositório tem só os ajustes do banco. As tabelas base (`conferences`, `conference_items`, `purchase_orders`, `profiles`), a função `my_role()` e o bucket de fotos `mercadoria-fotos` precisam existir no projeto do Supabase. Confirme também que o RLS está ligado em todas as tabelas.
+
+## Produto com mais de um código de barras
+
+Para produtos (ex.: importados) que chegam com códigos diferentes, execute uma vez `supabase-codigos-extras.sql` no SQL Editor do Supabase (depois de `supabase-produtos.sql`). Na tela de conferência, abra "Esse produto já existe com outro código?", procure o produto e toque nele. A partir daí, ler qualquer código conta no mesmo item, e os PDFs/planilhas mostram todos os códigos na mesma linha. O administrador pode desvincular um código na lista de produtos cadastrados.
